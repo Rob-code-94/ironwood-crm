@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Dependencies - will be installed fresh in container
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+
+# Next.js
+.next
+out
+dist
+
+# Environment variables - DO NOT BUNDLE SECRETS
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.jest
+coverage
+*.test.ts
+*.test.js
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+
+# Build artifacts
+build/
+.turbo
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.claude
+.next/cache
