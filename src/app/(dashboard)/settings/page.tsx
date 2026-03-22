@@ -1,4 +1,3 @@
-import { CrmAiSettingsCard } from "@/components/crm-ai-settings-card"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,18 +12,15 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="mt-1 text-muted-foreground">
-          Manage your account and preferences. To use the CRM assistant,{" "}
+          Manage your account and preferences. For AI assistant configuration, go to{" "}
           <a
             className="font-medium text-foreground underline underline-offset-2"
-            href="#gemini-api-key"
+            href="/assistant/settings"
           >
-            add your Gemini API key
-          </a>{" "}
-          in the section below.
+            AI Settings
+          </a>.
         </p>
       </div>
-
-      <CrmAiSettingsCard />
 
       {/* Profile */}
       <Card>

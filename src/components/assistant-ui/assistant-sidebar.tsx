@@ -25,7 +25,7 @@ export function AssistantSidebar({
   return (
     <ResizablePanelGroup
       orientation="horizontal"
-      className="flex h-full min-h-0 min-w-0 w-full flex-1"
+      className="flex h-full min-h-0 min-w-0 w-full flex-1 [&_[data-panel]]:transition-all [&_[data-panel]]:duration-300 [&_[data-panel]]:ease-in-out"
       resizeTargetMinimumSize={{ coarse: 32, fine: 16 }}
     >
       <ResizablePanel

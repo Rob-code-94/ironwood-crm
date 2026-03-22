@@ -86,6 +86,10 @@ const data = {
           url: "/chat",
         },
         {
+          title: "AI Settings",
+          url: "/assistant/settings",
+        },
+        {
           title: "Advisor",
           url: "/tools/advisor",
         },
