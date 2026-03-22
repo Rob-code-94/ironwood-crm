@@ -1,0 +1,13 @@
+---
+description: UI components follow coss ui (MIT registry) + Base UI
+globs: src/components/ui/**/*.tsx,src/app/**/*.css
+alwaysApply: false
+---
+
+# coss UI foundation
+
+- **Source of truth for pasted code:** [cosscom/coss](https://github.com/cosscom/coss) under `apps/ui/registry/default/` (MIT). Do **not** copy from `packages/ui` (@coss/ui is AGPL) without a separate license decision.
+- **Primitives:** Use `@base-ui/react`. Prefer the `render` prop for composition (Radix-style `asChild` is not used).
+- **Styling:** Tailwind v4 + tokens in [`src/app/globals.css`](src/app/globals.css) (`--alpha`, semantic colors, `--radius-*`).
+- **Particles:** Higher-level patterns live under [`src/components/particles/`](src/components/particles/); upstream catalog: [coss.com/ui/particles](https://coss.com/ui/particles).
+- **QA:** After UI changes, run `npm run build`. For visual parity, compare with [coss.com/ui](https://coss.com/ui) (browser MCP). For doc snippets, use Firecrawl per project rules.
