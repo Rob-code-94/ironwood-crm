@@ -34,9 +34,9 @@ export function AssistantSidebar({
     return DEFAULT_PANEL_SIZE
   })
 
-  const handleLayoutChange = (sizes: number[]) => {
-    // Save the assistant panel size (second panel)
-    if (sizes[1] > 0) localStorage.setItem(PANEL_SIZE_KEY, sizes[1].toString())
+  const handleResize = (panelSize: { asPercentage: number }) => {
+    const pct = panelSize.asPercentage
+    if (pct > 0) localStorage.setItem(PANEL_SIZE_KEY, pct.toString())
   }
 
   return (
@@ -44,7 +44,6 @@ export function AssistantSidebar({
       orientation="horizontal"
       className="flex h-full min-h-0 min-w-0 w-full flex-1 [&_[data-panel]]:transition-all [&_[data-panel]]:duration-300 [&_[data-panel]]:ease-in-out"
       resizeTargetMinimumSize={{ coarse: 32, fine: 16 }}
-      onLayout={handleLayoutChange}
     >
       <ResizablePanel
         id="dashboard-main"
@@ -65,6 +64,7 @@ export function AssistantSidebar({
         minSize={22}
         collapsible
         collapsedSize={0}
+        onResize={handleResize}
         className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-border/80 bg-background"
       >
         <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-2 pt-2 pb-2">
