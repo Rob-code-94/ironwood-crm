@@ -5,6 +5,7 @@
  * — resizable main column + assistant thread column.
  */
 import type { RefObject } from "react"
+import { useEffect, useState } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import {
   ResizableHandle,
@@ -18,19 +19,38 @@ type AssistantSidebarProps = {
   assistantPanelRef: RefObject<PanelImperativeHandle | null>
 }
 
+const PANEL_SIZE_KEY = "crm-assistant-panel-size"
+const DEFAULT_PANEL_SIZE = 40 // 40% for better default visibility
+
 export function AssistantSidebar({
   children,
   assistantPanelRef,
 }: AssistantSidebarProps) {
+  const [defaultSize, setDefaultSize] = useState(DEFAULT_PANEL_SIZE)
+
+  // Load saved panel size on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(PANEL_SIZE_KEY)
+    if (saved) {
+      setDefaultSize(Math.max(22, Math.min(78, parseFloat(saved))))
+    }
+  }, [])
+
+  const handleLayoutChange = (sizes: number[]) => {
+    // Save the assistant panel size (second panel)
+    localStorage.setItem(PANEL_SIZE_KEY, sizes[1].toString())
+  }
+
   return (
     <ResizablePanelGroup
       orientation="horizontal"
       className="flex h-full min-h-0 min-w-0 w-full flex-1 [&_[data-panel]]:transition-all [&_[data-panel]]:duration-300 [&_[data-panel]]:ease-in-out"
       resizeTargetMinimumSize={{ coarse: 32, fine: 16 }}
+      onLayout={handleLayoutChange}
     >
       <ResizablePanel
         id="dashboard-main"
-        defaultSize={68}
+        defaultSize={100 - defaultSize}
         minSize={38}
         className="flex min-h-0 min-w-0 flex-col"
       >
@@ -43,7 +63,7 @@ export function AssistantSidebar({
       <ResizablePanel
         id="crm-assistant-sidebar"
         panelRef={assistantPanelRef}
-        defaultSize={32}
+        defaultSize={defaultSize}
         minSize={22}
         collapsible
         collapsedSize={0}
