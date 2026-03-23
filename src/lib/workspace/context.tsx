@@ -14,6 +14,7 @@ import type {
   Contact,
   Deal,
   DealStage,
+  Document,
   Priority,
   Project,
   ProjectLifecycleStatus,
@@ -65,6 +66,7 @@ type WorkspaceContextValue = {
   contacts: Contact[]
   companies: Company[]
   deals: Deal[]
+  documents: Document[]
   savedChatTurns: SavedChatTurn[]
   selectedProjectFilterId: string
   setSelectedProjectFilterId: (id: string) => void
@@ -90,6 +92,8 @@ type WorkspaceContextValue = {
   appendSavedChatTurn: (turn: Omit<SavedChatTurn, "id" | "createdAt">) => void
   clearSavedChatTurns: () => void
   projectNameById: (id: string | undefined) => string | undefined
+  addDocument: (doc: Omit<Document, "id">) => Document
+  deleteDocument: (id: string) => void
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -135,6 +139,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (s && Array.isArray(s.savedChatTurns)) return s.savedChatTurns
     return []
   })
+  const [documents, setDocuments] = useState<Document[]>(() => {
+    const s = loadWorkspaceSnapshot()
+    if (s && Array.isArray(s.documents)) return s.documents
+    return []
+  })
   const [selectedProjectFilterId, setSelectedProjectFilterId] = useState<string>(
     () => loadWorkspaceSnapshot()?.selectedProjectFilterId ?? ALL_PROJECTS_FILTER
   )
@@ -149,6 +158,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deals,
       selectedProjectFilterId,
       savedChatTurns,
+      documents,
     }
     const t = window.setTimeout(() => saveWorkspaceSnapshot(snapshot), 400)
     return () => window.clearTimeout(t)
@@ -160,6 +170,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     deals,
     selectedProjectFilterId,
     savedChatTurns,
+    documents,
   ])
 
   const projectNameById = useCallback(
@@ -362,6 +373,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSavedChatTurns([])
   }, [])
 
+  const addDocument = useCallback((doc: Omit<Document, "id">): Document => {
+    const next: Document = { ...doc, id: crypto.randomUUID() }
+    setDocuments((prev) => [next, ...prev])
+    return next
+  }, [])
+
+  const deleteDocument = useCallback((id: string) => {
+    setDocuments((prev) => prev.filter((d) => d.id !== id))
+  }, [])
+
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       projects,
@@ -369,6 +390,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       contacts,
       companies,
       deals,
+      documents,
       savedChatTurns,
       selectedProjectFilterId,
       setSelectedProjectFilterId,
@@ -388,6 +410,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       appendSavedChatTurn,
       clearSavedChatTurns,
       projectNameById,
+      addDocument,
+      deleteDocument,
     }),
     [
       projects,
@@ -395,6 +419,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       contacts,
       companies,
       deals,
+      documents,
       savedChatTurns,
       selectedProjectFilterId,
       addProject,
@@ -413,6 +438,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       appendSavedChatTurn,
       clearSavedChatTurns,
       projectNameById,
+      addDocument,
+      deleteDocument,
     ]
   )
 

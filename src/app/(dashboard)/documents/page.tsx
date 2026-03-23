@@ -23,7 +23,6 @@ import {
   Trash,
 } from "@phosphor-icons/react"
 import type { Document, DocumentType } from "@/lib/types"
-import { seedDocuments } from "@/lib/workspace/seed"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 
 const FileIcon = ({ type }: { type: DocumentType }) => {
@@ -44,8 +43,7 @@ function formatSize(bytes: number) {
 }
 
 export default function DocumentsPage() {
-  const { projects, selectedProjectFilterId } = useWorkspace()
-  const [docs, setDocs] = useState<Document[]>(() => [...seedDocuments])
+  const { projects, selectedProjectFilterId, documents, addDocument, deleteDocument } = useWorkspace()
   const [search, setSearch] = useState("")
   const [projectFilter, setProjectFilter] = useState("all")
   const [isDragging, setIsDragging] = useState(false)
@@ -62,7 +60,7 @@ export default function DocumentsPage() {
       ? selectedProjectFilterId
       : projectFilter
 
-  const filtered = docs.filter((d) => {
+  const filtered = documents.filter((d) => {
     const matchSearch = d.name.toLowerCase().includes(search.toLowerCase())
     const matchProject =
       effectiveProjectFilter === "all" || d.projectId === effectiveProjectFilter
@@ -80,22 +78,14 @@ export default function DocumentsPage() {
         : ["doc", "docx"].includes(ext ?? "") ? "document"
         : "other"
 
-      setDocs((prev) => [
-        {
-          id: String(Date.now()),
-          name: file.name,
-          url: URL.createObjectURL(file),
-          size: file.size,
-          type,
-          uploadedAt: new Date().toISOString().split("T")[0],
-        },
-        ...prev,
-      ])
+      addDocument({
+        name: file.name,
+        url: null,
+        size: file.size,
+        type,
+        uploadedAt: new Date().toISOString().split("T")[0],
+      })
     })
-  }
-
-  function removeDoc(id: string) {
-    setDocs((prev) => prev.filter((d) => d.id !== id))
   }
 
   return (
@@ -103,7 +93,7 @@ export default function DocumentsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Documents</h1>
-          <p className="text-muted-foreground mt-1">{docs.length} files uploaded</p>
+          <p className="text-muted-foreground mt-1">{documents.length} files uploaded</p>
           {selectedProjectFilterId !== ALL_PROJECTS_FILTER && (
             <p className="text-xs text-muted-foreground mt-1">
               Sidebar filter:{" "}
@@ -191,8 +181,11 @@ export default function DocumentsPage() {
                       <> · <Badge variant="outline" className="text-xs ml-1">{doc.projectName}</Badge></>
                     )}
                   </p>
+                  {doc.url === null && (
+                    <p className="text-xs text-amber-600 mt-0.5">File not available — re-upload</p>
+                  )}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => removeDoc(doc.id)}>
+                <Button variant="ghost" size="sm" onClick={() => deleteDocument(doc.id)}>
                   <Trash size={16} className="text-muted-foreground" />
                 </Button>
               </CardContent>

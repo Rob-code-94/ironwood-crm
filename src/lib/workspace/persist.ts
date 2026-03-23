@@ -2,6 +2,7 @@ import type {
   Company,
   Contact,
   Deal,
+  Document,
   Project,
   SavedChatTurn,
   Task,
@@ -18,6 +19,7 @@ export type WorkspaceSnapshotV1 = {
   deals: Deal[]
   selectedProjectFilterId: string
   savedChatTurns: SavedChatTurn[]
+  documents?: Document[]
 }
 
 export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
@@ -28,6 +30,7 @@ export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
     const data = JSON.parse(raw) as WorkspaceSnapshotV1
     if (data?.version !== 1 || !Array.isArray(data.projects)) return null
     if (!Array.isArray(data.savedChatTurns)) data.savedChatTurns = []
+    if (!Array.isArray(data.documents)) data.documents = []
     return data
   } catch {
     return null

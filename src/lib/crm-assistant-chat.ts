@@ -12,6 +12,7 @@ import {
   getStoredCrmAiModel,
   getStoredCrmSystemPrompt,
 } from "@/lib/crm-ai-settings"
+import { getActiveAgent } from "@/lib/agents"
 
 export type CreatedCommandTask = {
   id: string
@@ -141,12 +142,14 @@ export function useCrmChatModelAdapter(
             yield { content: [{ type: "text", text: "No user message to run as a command." }] }
             return
           }
+          const activeAgentForCmd = getActiveAgent()
+          const cmdModel = activeAgentForCmd ? activeAgentForCmd.model : getStoredCrmAiModel()
           const res = await fetch("/api/execute-command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               command: text,
-              model: getStoredCrmAiModel(),
+              model: cmdModel,
             }),
             signal: options.abortSignal,
           })
@@ -198,13 +201,19 @@ export function useCrmChatModelAdapter(
           return
         }
 
+        const activeAgent = getActiveAgent()
+        const resolvedModel = activeAgent ? activeAgent.model : getStoredCrmAiModel()
+        const resolvedSystem = activeAgent
+          ? activeAgent.systemPrompt.trim() || undefined
+          : getStoredCrmSystemPrompt().trim() || undefined
+
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages,
-            model: getStoredCrmAiModel(),
-            system: getStoredCrmSystemPrompt().trim() || undefined,
+            model: resolvedModel,
+            system: resolvedSystem,
             stream: true,
           }),
           signal: options.abortSignal,

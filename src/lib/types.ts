@@ -49,7 +49,7 @@ export interface Task {
 export interface Document {
   id: string
   name: string
-  url: string
+  url: string | null
   size: number
   type: DocumentType
   projectId?: string

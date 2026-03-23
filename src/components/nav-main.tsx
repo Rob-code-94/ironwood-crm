@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import {
   Collapsible,
   CollapsibleContent,
@@ -46,7 +47,12 @@ export function NavMain({
             render={<SidebarMenuItem />}
           >
             <CollapsibleTrigger
-              render={<SidebarMenuButton tooltip={item.title} />}
+              render={
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  render={<Link href={item.url} />}
+                />
+              }
             >
               {typeof ItemIcon === "function" ? (
                 <ItemIcon className="size-4" />
@@ -54,7 +60,9 @@ export function NavMain({
                 ItemIcon
               )}
               <span>{item.title}</span>
-              <RiArrowRightSLine className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+              {item.items && item.items.length > 0 && (
+                <RiArrowRightSLine className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+              )}
             </CollapsibleTrigger>
             <CollapsibleContent>
               <SidebarMenuSub>

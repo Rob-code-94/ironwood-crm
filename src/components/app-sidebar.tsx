@@ -78,22 +78,8 @@ const data = {
     },
     {
       title: "Assistant",
-      url: "/chat",
+      url: "/assistant",
       icon: RiChatSmileAiLine,
-      items: [
-        {
-          title: "CRM AI chat",
-          url: "/chat",
-        },
-        {
-          title: "AI Settings",
-          url: "/assistant/settings",
-        },
-        {
-          title: "Advisor",
-          url: "/tools/advisor",
-        },
-      ],
     },
     {
       title: "Tasks",
