@@ -37,7 +37,11 @@ function ThreadSection() {
       const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw) as StoredThread
-        setHistory((parsed.messages ?? []).slice(-10).reverse())
+        const messages = (parsed.messages ?? [])
+          .filter((msg): msg is SimpleChatMessage => msg && typeof msg.content === "string")
+          .slice(-10)
+          .reverse()
+        setHistory(messages)
       }
     } catch {}
   }, [])
@@ -67,7 +71,7 @@ function ThreadSection() {
             {history.map((msg, i) => (
               <div key={i} className={`rounded-lg px-3 py-2 text-xs ${msg.role === "user" ? "bg-muted text-right" : "bg-primary/5"}`}>
                 <span className="font-medium capitalize text-muted-foreground">{msg.role}: </span>
-                {msg.content.slice(0, 120)}{msg.content.length > 120 ? "…" : ""}
+                {(msg.content || "").slice(0, 120)}{(msg.content || "").length > 120 ? "…" : ""}
               </div>
             ))}
           </div>
