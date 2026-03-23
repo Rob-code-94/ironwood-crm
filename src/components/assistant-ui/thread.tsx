@@ -157,7 +157,7 @@ export function Thread() {
         turnAnchor="top"
         className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scroll-smooth"
       >
-        <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-24">
+        <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-2">
           <AuiIf condition={(s) => s.thread.isEmpty}>
             <ThreadWelcome />
           </AuiIf>
@@ -174,27 +174,27 @@ export function Thread() {
             <div className="min-h-4 flex-1 shrink-0" aria-hidden />
           </AuiIf>
         </div>
-
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 shrink-0 border-t border-border/60 bg-background px-3 pt-3 pb-3 shadow-[0_-8px_24px_-8px_hsl(0_0%_0%/0.08)] dark:shadow-[0_-8px_24px_-8px_hsl(0_0%_0%/0.35)]">
-          <div className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-3">
-            <div className="flex justify-center">
-              <ThreadPrimitive.ScrollToBottom asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-full"
-                  title="Scroll to bottom"
-                >
-                  <ArrowDownIcon className="size-4" />
-                  <span className="sr-only">Scroll to bottom</span>
-                </Button>
-              </ThreadPrimitive.ScrollToBottom>
-            </div>
-            <Composer />
-          </div>
-        </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
+
+      <ThreadPrimitive.ViewportFooter className="flex-0 shrink-0 border-t border-border/60 bg-background px-3 pt-3 pb-3 shadow-[0_-8px_24px_-8px_hsl(0_0%_0%/0.08)] dark:shadow-[0_-8px_24px_-8px_hsl(0_0%_0%/0.35)]">
+        <div className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-3">
+          <div className="flex justify-center">
+            <ThreadPrimitive.ScrollToBottom asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                title="Scroll to bottom"
+              >
+                <ArrowDownIcon className="size-4" />
+                <span className="sr-only">Scroll to bottom</span>
+              </Button>
+            </ThreadPrimitive.ScrollToBottom>
+          </div>
+          <Composer />
+        </div>
+      </ThreadPrimitive.ViewportFooter>
     </ThreadPrimitive.Root>
   )
 }
