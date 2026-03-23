@@ -53,25 +53,30 @@ export function DashboardInsetShell({
 }: DashboardInsetShellProps) {
   const assistantPanelRef = usePanelRef()
 
+  const getSavedPanelSize = useCallback(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("crm-assistant-panel-size") : null
+    return saved ? Math.max(22, Math.min(78, parseFloat(saved))) : 40
+  }, [])
+
   const togglePanel = useCallback(() => {
     const p = assistantPanelRef.current
     if (!p) return
     const pct = p.getSize().asPercentage
     const tooNarrow = pct < 16
     if (p.isCollapsed() || tooNarrow) {
-      p.resize(32)
+      p.resize(getSavedPanelSize())
     } else {
       p.collapse()
     }
-  }, [assistantPanelRef])
+  }, [assistantPanelRef, getSavedPanelSize])
 
   const expandPanel = useCallback(() => {
     const p = assistantPanelRef.current
     if (!p) return
     if (p.isCollapsed() || p.getSize().asPercentage < 16) {
-      p.resize(32)
+      p.resize(getSavedPanelSize())
     }
-  }, [assistantPanelRef])
+  }, [assistantPanelRef, getSavedPanelSize])
 
   const collapsePanel = useCallback(() => {
     assistantPanelRef.current?.collapse()

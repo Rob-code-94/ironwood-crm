@@ -5,7 +5,7 @@
  * — resizable main column + assistant thread column.
  */
 import type { RefObject } from "react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import {
   ResizableHandle,
@@ -20,25 +20,23 @@ type AssistantSidebarProps = {
 }
 
 const PANEL_SIZE_KEY = "crm-assistant-panel-size"
-const DEFAULT_PANEL_SIZE = 40 // 40% for better default visibility
+const DEFAULT_PANEL_SIZE = 32
 
 export function AssistantSidebar({
   children,
   assistantPanelRef,
 }: AssistantSidebarProps) {
-  const [defaultSize, setDefaultSize] = useState(DEFAULT_PANEL_SIZE)
-
-  // Load saved panel size on mount
-  useEffect(() => {
+  const [defaultSize] = useState(() => {
+    // Safely read localStorage during client-side initialization only
+    if (typeof window === "undefined") return DEFAULT_PANEL_SIZE
     const saved = localStorage.getItem(PANEL_SIZE_KEY)
-    if (saved) {
-      setDefaultSize(Math.max(22, Math.min(78, parseFloat(saved))))
-    }
-  }, [])
+    if (saved) return Math.max(22, Math.min(78, parseFloat(saved)))
+    return DEFAULT_PANEL_SIZE
+  })
 
   const handleLayoutChange = (sizes: number[]) => {
     // Save the assistant panel size (second panel)
-    localStorage.setItem(PANEL_SIZE_KEY, sizes[1].toString())
+    if (sizes[1] > 0) localStorage.setItem(PANEL_SIZE_KEY, sizes[1].toString())
   }
 
   return (
