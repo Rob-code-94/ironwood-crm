@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useRef } from "react"
 import type {
   Attachment,
   AttachmentAdapter,
@@ -45,16 +45,67 @@ export class FallbackDocumentAttachmentAdapter implements AttachmentAdapter {
   }
 
   async send(attachment: PendingAttachment) {
-    let body: string
+    let extractedText: string
     try {
-      body = await attachment.file.text()
-      if (body.length > 16_000) {
-        body = `${body.slice(0, 16_000)}\n\n[truncated]`
+      const fd = new FormData()
+      fd.set("file", attachment.file)
+      fd.set("instructions", "Summarize key points, list action items with any dates mentioned.")
+      fd.set("model", getStoredCrmAiModel())
+      const res = await fetch("/api/process-file", { method: "POST", body: fd })
+      if (res.ok) {
+        const data = (await res.json()) as { extracted?: string; error?: string }
+        extractedText =
+          typeof data.extracted === "string"
+            ? data.extracted
+            : `[Could not extract content from ${attachment.name}]`
+      } else {
+        // Fall back to raw text read
+        try {
+          extractedText = await attachment.file.text()
+          if (extractedText.length > 8_000) extractedText = `${extractedText.slice(0, 8_000)}\n[truncated]`
+        } catch {
+          extractedText = `[Could not read file: ${attachment.name}]`
+        }
       }
     } catch {
-      body = `[Could not read file as text: ${attachment.name}]`
+      try {
+        extractedText = await attachment.file.text()
+        if (extractedText.length > 8_000) extractedText = `${extractedText.slice(0, 8_000)}\n[truncated]`
+      } catch {
+        extractedText = `[Could not read file: ${attachment.name}]`
+      }
     }
-    const text = `Attached file: **${attachment.name}**\n\n${body || "(empty or binary)"}`
+
+    const text = `Attached file: **${attachment.name}**\n\n${extractedText || "(empty or binary)"}`
+
+    // Best-effort index into Gemini File Search so the assistant can later
+    // answer "search inside my uploaded docs" queries.
+    try {
+      const existingStoreName =
+        typeof window !== "undefined" ? window.localStorage.getItem(FILE_SEARCH_STORE_KEY) : null
+
+      const fd = new FormData()
+      fd.set("file", attachment.file)
+      fd.set("displayName", attachment.name)
+      if (existingStoreName) fd.set("storeName", existingStoreName)
+
+      if (existingStoreName) {
+        fetch("/api/file-search/index", { method: "POST", body: fd }).catch(() => {
+          /* ignore indexing failures */
+        })
+      } else {
+        const r = await fetch("/api/file-search/index", { method: "POST", body: fd }).catch(() => null)
+        if (r?.ok) {
+          const data = (await r.json()) as { storeName?: string }
+          if (data?.storeName && typeof window !== "undefined") {
+            window.localStorage.setItem(FILE_SEARCH_STORE_KEY, data.storeName)
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return {
       ...attachment,
       status: { type: "complete" as const },
@@ -126,17 +177,150 @@ function formatCommandReply(data: {
   return lines.join("\n")
 }
 
+const TASK_INTENT_RE = /\b(tasks?|action items?|create|add|extract|to-?do|review|breakdown|list|organize|analyze)\b/i
+
+const CONFIRM_RE = /^(yes|yep|ok|okay|proceed|go ahead|continue)\b/i
+const CANCEL_RE = /^(no|nope|cancel|stop|never mind)\b/i
+const RESEARCH_INTENT_RE =
+  /\b(find|lookup|research|search)\b.*\b(phone|number|contact|company|website|email|address)\b|\b(phone|number|contact|company|website|email|address)\b.*\b(find|lookup|research|search)\b/i
+
+const FILE_SEARCH_STORE_KEY = "ironwood.fileSearch.storeName.v1"
+const DOC_SEARCH_INTENT_RE =
+  /\b(find|lookup|search)\b.*\b(document|file|attachment|uploaded|attached)\b|\b(phone|number|contact|company|website|email|address)\b.*\b(in|from)\b.*\b(document|file|attachment|uploaded|attached)\b|\b(in|from)\b.*\b(document|file|attachment|uploaded|attached)\b/i
+
+function hasDocumentAttachments(messages: readonly ThreadMessage[]): boolean {
+  // Scan the last 6 messages (3 turns) so multi-turn "upload then ask" works
+  const recent = messages.slice(-6)
+  for (const m of recent) {
+    if (m.role !== "user") continue
+    for (const c of m.content) {
+      if (c.type === "text" && (c as { text: string }).text.startsWith("Attached file:")) return true
+    }
+  }
+  return false
+}
+
 export function useCrmChatModelAdapter(
   commandModeRef: React.MutableRefObject<boolean>,
   onTasksCreatedRef: React.MutableRefObject<((tasks: CreatedCommandTask[]) => void) | undefined>,
   onProjectsCreatedRef: React.MutableRefObject<
     ((projects: CreatedCommandProject[]) => void) | undefined
-  >
+  >,
+  workspaceContext?: string
 ): ChatModelAdapter {
+  const pendingActionsRef = useRef<{
+    tasks: CreatedCommandTask[]
+    projects: CreatedCommandProject[]
+    message?: string
+  } | null>(null)
+
   return useMemo(
     () => ({
       async *run(options) {
-        if (commandModeRef.current) {
+        // Confirmation gate:
+        // - When the assistant detects an actionable intent, it stores pending tasks/projects.
+        // - It only persists them after the user replies with "yes/ok/proceed".
+        const lastUserTextValue = lastUserText(options.messages)
+        const hasPendingActions = pendingActionsRef.current !== null
+        if (hasPendingActions) {
+          if (CONFIRM_RE.test(lastUserTextValue)) {
+            const pending = pendingActionsRef.current
+            pendingActionsRef.current = null
+
+            if (!pending) return
+
+            if (pending.tasks.length && onTasksCreatedRef.current) {
+              onTasksCreatedRef.current(pending.tasks)
+            }
+            if (pending.projects.length && onProjectsCreatedRef.current) {
+              onProjectsCreatedRef.current(pending.projects)
+            }
+
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: formatCommandReply({
+                    success: true,
+                    message: pending.message ?? "Added to your workspace.",
+                    tasks: pending.tasks,
+                    projects: pending.projects,
+                  }),
+                },
+              ],
+            }
+            return
+          }
+
+          if (CANCEL_RE.test(lastUserTextValue)) {
+            pendingActionsRef.current = null
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: "Cancelled. No changes were made.",
+                },
+              ],
+            }
+            return
+          }
+        }
+
+        // Search inside uploaded docs (Gemini File Search).
+        // Only triggers in the CRM assistant and only for doc-lookup style requests.
+        if (
+          !hasPendingActions &&
+          !commandModeRef.current &&
+          hasDocumentAttachments(options.messages) &&
+          DOC_SEARCH_INTENT_RE.test(lastUserTextValue) &&
+          !TASK_INTENT_RE.test(lastUserTextValue)
+        ) {
+          const storeName =
+            typeof window !== "undefined" ? window.localStorage.getItem(FILE_SEARCH_STORE_KEY) ?? "" : ""
+
+          if (storeName.startsWith("fileSearchStores/")) {
+            const activeAgent = getActiveAgent()
+            const resolvedModel = activeAgent ? activeAgent.model : getStoredCrmAiModel()
+            const resolvedSystem = activeAgent
+              ? activeAgent.systemPrompt.trim() || undefined
+              : getStoredCrmSystemPrompt().trim() || undefined
+
+            const systemForRequest = (() => {
+              const base = resolvedSystem
+              if (!workspaceContext || !workspaceContext.trim()) return base
+              if (base) return `${base}\n\nWorkspace context:\n${workspaceContext.trim()}`
+              return `Workspace context:\n${workspaceContext.trim()}`
+            })()
+
+            const res = await fetch("/api/file-search/query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                storeName,
+                query: lastUserTextValue,
+                model: resolvedModel,
+                system: systemForRequest,
+              }),
+              signal: options.abortSignal,
+            })
+
+            if (res.ok) {
+              const data = (await res.json()) as { text?: string }
+              yield {
+                content: [
+                  {
+                    type: "text",
+                    text: typeof data.text === "string" ? data.text : "Done.",
+                  },
+                ],
+              }
+              return
+            }
+          }
+          // If File Search isn't ready yet, fall back to normal chat.
+        }
+
+        if (!hasPendingActions && commandModeRef.current) {
           const text = lastUserText(options.messages)
           if (!text.trim()) {
             yield { content: [{ type: "text", text: "No user message to run as a command." }] }
@@ -173,12 +357,32 @@ export function useCrmChatModelAdapter(
           }
           const tasks = Array.isArray(data.tasks) ? data.tasks : []
           const projects = Array.isArray(data.projects) ? data.projects : []
-          if (data.success && tasks.length && onTasksCreatedRef.current) {
-            onTasksCreatedRef.current(tasks)
+
+          if (data.success && (tasks.length || projects.length)) {
+            pendingActionsRef.current = {
+              tasks,
+              projects,
+              message: typeof data.message === "string" ? data.message : undefined,
+            }
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    typeof data.message === "string" ? data.message : "I’m ready to make changes.",
+                    "",
+                    `Proposed changes:`,
+                    tasks.length ? `- Add ${tasks.length} task(s).` : `- No tasks to add.`,
+                    projects.length ? `- Add ${projects.length} project(s).` : `- No projects to add.`,
+                    "",
+                    `Reply "yes" to confirm, or "no" to cancel.`,
+                  ].join("\n"),
+                },
+              ],
+            }
+            return
           }
-          if (data.success && projects.length && onProjectsCreatedRef.current) {
-            onProjectsCreatedRef.current(projects)
-          }
+
           yield {
             content: [
               {
@@ -188,6 +392,72 @@ export function useCrmChatModelAdapter(
                   message: typeof data.message === "string" ? data.message : "Done.",
                   tasks,
                   projects,
+                }),
+              },
+            ],
+          }
+          return
+        }
+
+        // Auto-route: when a document is attached and the user's message has task intent,
+        // pipe to /api/execute-command to create tasks — no manual command mode toggle needed.
+        const userText = lastUserText(options.messages)
+        if (!hasPendingActions && hasDocumentAttachments(options.messages) && TASK_INTENT_RE.test(userText)) {
+          const fullCommand = threadMessagesToApi(options.messages)
+            .map((m) => m.content)
+            .join("\n")
+          const activeAgentForDoc = getActiveAgent()
+          const docModel = activeAgentForDoc ? activeAgentForDoc.model : getStoredCrmAiModel()
+          const docRes = await fetch("/api/execute-command", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command: fullCommand, commandType: "create-tasks", model: docModel }),
+            signal: options.abortSignal,
+          })
+          const docData = (await docRes.json()) as {
+            success?: boolean
+            message?: string
+            tasks?: CreatedCommandTask[]
+            projects?: CreatedCommandProject[]
+            error?: string
+          }
+          const docTasks = Array.isArray(docData.tasks) ? docData.tasks : []
+          const docProjects = Array.isArray(docData.projects) ? docData.projects : []
+
+          if (docData.success && (docTasks.length || docProjects.length)) {
+            pendingActionsRef.current = {
+              tasks: docTasks,
+              projects: docProjects,
+              message: typeof docData.message === "string" ? docData.message : undefined,
+            }
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    typeof docData.message === "string" ? docData.message : "I’m ready to make changes.",
+                    "",
+                    `Proposed changes:`,
+                    docTasks.length ? `- Add ${docTasks.length} task(s).` : `- No tasks to add.`,
+                    docProjects.length ? `- Add ${docProjects.length} project(s).` : `- No projects to add.`,
+                    "",
+                    `Reply "yes" to confirm, or "no" to cancel.`,
+                  ].join("\n"),
+                },
+              ],
+            }
+            return
+          }
+
+          yield {
+            content: [
+              {
+                type: "text",
+                text: formatCommandReply({
+                  success: Boolean(docData.success),
+                  message: typeof docData.message === "string" ? docData.message : "Done.",
+                  tasks: docTasks,
+                  projects: docProjects,
                 }),
               },
             ],
@@ -207,14 +477,23 @@ export function useCrmChatModelAdapter(
           ? activeAgent.systemPrompt.trim() || undefined
           : getStoredCrmSystemPrompt().trim() || undefined
 
-        const res = await fetch("/api/chat", {
+        const systemForRequest = (() => {
+          const base = resolvedSystem
+          if (!workspaceContext || !workspaceContext.trim()) return base
+          if (base) return `${base}\n\nWorkspace context:\n${workspaceContext.trim()}`
+          return `Workspace context:\n${workspaceContext.trim()}`
+        })()
+
+        const shouldResearch = RESEARCH_INTENT_RE.test(lastUserTextValue) && !TASK_INTENT_RE.test(lastUserTextValue)
+        const res = await fetch(shouldResearch ? "/api/research-chat" : "/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages,
             model: resolvedModel,
-            system: resolvedSystem,
-            stream: true,
+            system: systemForRequest,
+            // Avoid SSE streaming in dev; some environments fail on alt=sse.
+            stream: false,
           }),
           signal: options.abortSignal,
         })
@@ -235,22 +514,24 @@ export function useCrmChatModelAdapter(
           return
         }
 
-        const reader = res.body?.getReader()
-        if (!reader) {
-          yield { content: [{ type: "text", text: "No response body." }] }
+        if (shouldResearch) {
+          const data = (await res.json()) as { text?: string; error?: string }
+          yield { content: [{ type: "text", text: typeof data.text === "string" ? data.text : "Done." }] }
           return
         }
 
-        const dec = new TextDecoder()
-        let acc = ""
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          acc += dec.decode(value, { stream: true })
-          yield { content: [{ type: "text", text: acc }] }
+        const data = (await res.json().catch(() => ({}))) as { text?: string }
+        yield {
+          content: [
+            {
+              type: "text",
+              text: typeof data.text === "string" ? data.text : "Done.",
+            },
+          ],
         }
+        return
       },
     }),
-    [commandModeRef, onTasksCreatedRef, onProjectsCreatedRef]
+    [commandModeRef, onTasksCreatedRef, onProjectsCreatedRef, workspaceContext]
   )
 }
