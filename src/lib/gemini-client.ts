@@ -85,6 +85,53 @@ export async function* streamGeminiChat(options: {
   }
 }
 
+/**
+ * Non-streaming Gemini chat generation.
+ * Uses `chat.sendMessage()` instead of `sendMessageStream()`,
+ * so it avoids SSE streaming endpoints that may fail in some environments.
+ */
+export async function generateGeminiChatOnce(options: {
+  apiKey: string
+  model: CrmAiModelId
+  systemInstruction?: string
+  messages: SimpleChatMessage[]
+  signal?: AbortSignal
+}): Promise<string> {
+  const merged = coalesceChatTurns(options.messages)
+  if (merged.length === 0) return ""
+
+  const genAI = new GoogleGenerativeAI(options.apiKey)
+  const model = genAI.getGenerativeModel({
+    model: options.model,
+    systemInstruction: options.systemInstruction?.trim() || undefined,
+  })
+
+  const last = merged[merged.length - 1]
+
+  if (last.role !== "user") {
+    const prompt = merged
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n")
+    const res = await model.generateContent(prompt, { signal: options.signal })
+    return res.response.text()
+  }
+
+  const history = merged.slice(0, -1).map((m) => ({
+    role: m.role === "user" ? ("user" as const) : ("model" as const),
+    parts: [{ text: m.content }],
+  }))
+
+  const chat = model.startChat({
+    history,
+    generationConfig: {
+      maxOutputTokens: 8192,
+    },
+  })
+
+  const res = await chat.sendMessage(last.content, { signal: options.signal })
+  return res.response.text()
+}
+
 export async function generateGeminiText(options: {
   apiKey: string
   model: CrmAiModelId

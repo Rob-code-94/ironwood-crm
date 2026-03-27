@@ -21,6 +21,10 @@ import type { ExportedMessageRepository } from "@assistant-ui/core"
 import {
   CRM_ASSISTANT_THREAD_STORAGE_KEY,
   clearCrmAssistantThreadStorage,
+  getSavedThreads,
+  addSavedThread,
+  deleteSavedThread,
+  type SavedThread,
 } from "@/lib/crm-assistant-storage"
 import {
   FallbackDocumentAttachmentAdapter,
@@ -28,16 +32,36 @@ import {
   type CreatedCommandProject,
   type CreatedCommandTask,
 } from "@/lib/crm-assistant-chat"
-import { useWorkspace } from "@/lib/workspace/context"
+import { useWorkspace, ALL_PROJECTS_FILTER } from "@/lib/workspace/context"
 
 function isHexColor(s: string): boolean {
   return /^#[0-9A-Fa-f]{6}$/.test(s.trim())
+}
+
+/** Extract a display title from an exported thread's messages */
+function threadTitle(exported: ExportedMessageRepository): string {
+  const messages = ((exported as unknown) as { messages?: { role: string; content?: { type: string; text?: string }[] }[] }).messages ?? []
+  for (const m of messages) {
+    if (m.role === "user" && Array.isArray(m.content)) {
+      for (const c of m.content) {
+        if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
+          const snippet = c.text.trim().slice(0, 55)
+          return snippet.length < c.text.trim().length ? `${snippet}…` : snippet
+        }
+      }
+    }
+  }
+  return `Chat on ${new Date().toLocaleDateString()}`
 }
 
 type CrmAssistantUiValue = {
   commandMode: boolean
   setCommandMode: (v: boolean) => void
   resetThread: () => void
+  saveAndNewThread: () => void
+  loadThread: (id: string) => void
+  deleteThread: (id: string) => void
+  savedThreads: SavedThread[]
 }
 
 const CrmAssistantUiContext = createContext<CrmAssistantUiValue | null>(null)
@@ -55,7 +79,12 @@ function CrmAssistantRuntime({
 }: {
   children: ReactNode
 }) {
-  const { addTask, addProject } = useWorkspace()
+  const { addTask, addProject, selectedProjectFilterId, projects } = useWorkspace()
+  // Keep a ref so the task-creation callback always uses the latest project filter
+  const selectedProjectRef = useRef<string>(selectedProjectFilterId)
+  useEffect(() => {
+    selectedProjectRef.current = selectedProjectFilterId
+  }, [selectedProjectFilterId])
   const onTasksCreatedRef = useRef<((tasks: CreatedCommandTask[]) => void) | undefined>(
     undefined
   )
@@ -65,12 +94,17 @@ function CrmAssistantRuntime({
 
   useEffect(() => {
     onTasksCreatedRef.current = (tasks) => {
+      const projectId =
+        selectedProjectRef.current !== ALL_PROJECTS_FILTER
+          ? selectedProjectRef.current
+          : undefined
       for (const t of tasks) {
         addTask({
           title: t.title,
           description: t.description,
           priority: "medium",
           dueDate: t.dueDate,
+          projectId,
         })
       }
     }
@@ -90,6 +124,22 @@ function CrmAssistantRuntime({
     }
   }, [addProject])
 
+  const workspaceContext = useMemo(() => {
+    const filterId = selectedProjectFilterId
+    if (!filterId) return "Current project filter: unknown."
+
+    if (filterId === ALL_PROJECTS_FILTER) {
+      return "Current project filter: all projects."
+    }
+
+    const projectName = projects.find((p) => p.id === filterId)?.name
+    if (!projectName) {
+      return `Current project filter id: ${filterId}.`
+    }
+
+    return `Current project filter: ${projectName}. When the assistant creates tasks/projects, they will be saved in this project context.`
+  }, [projects, selectedProjectFilterId])
+
   const [commandMode, setCommandMode] = useState(false)
   const commandModeRef = useRef(commandMode)
   useEffect(() => {
@@ -99,7 +149,8 @@ function CrmAssistantRuntime({
   const adapter = useCrmChatModelAdapter(
     commandModeRef,
     onTasksCreatedRef,
-    onProjectsCreatedRef
+    onProjectsCreatedRef,
+    workspaceContext
   )
 
   const attachments = useMemo(
@@ -157,18 +208,72 @@ function CrmAssistantRuntime({
     }
   }, [runtime])
 
+  const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
+    getSavedThreads()
+  )
+
   const resetThread = useCallback(() => {
     clearCrmAssistantThreadStorage()
     runtime.thread.reset()
   }, [runtime])
+
+  const saveAndNewThread = useCallback(() => {
+    const exported = runtime.thread.export()
+    const messages = (exported as { messages?: unknown[] }).messages ?? []
+    if (messages.length > 0) {
+      const saved: SavedThread = {
+        id: crypto.randomUUID(),
+        title: threadTitle(exported),
+        savedAt: new Date().toISOString(),
+        data: exported,
+      }
+      addSavedThread(saved)
+      setSavedThreads(getSavedThreads())
+    }
+    clearCrmAssistantThreadStorage()
+    runtime.thread.reset()
+  }, [runtime])
+
+  const loadThread = useCallback(
+    (id: string) => {
+      const threads = getSavedThreads()
+      const found = threads.find((t) => t.id === id)
+      if (!found) return
+      clearCrmAssistantThreadStorage()
+      runtime.thread.reset()
+      // Small delay so reset propagates before we import
+      setTimeout(() => {
+        try {
+          runtime.thread.import(found.data as ExportedMessageRepository)
+          // Persist so the loaded thread auto-saves going forward
+          localStorage.setItem(
+            CRM_ASSISTANT_THREAD_STORAGE_KEY,
+            JSON.stringify(found.data)
+          )
+        } catch {
+          /* ignore */
+        }
+      }, 50)
+    },
+    [runtime]
+  )
+
+  const deleteThread = useCallback((id: string) => {
+    deleteSavedThread(id)
+    setSavedThreads(getSavedThreads())
+  }, [])
 
   const uiValue = useMemo<CrmAssistantUiValue>(
     () => ({
       commandMode,
       setCommandMode,
       resetThread,
+      saveAndNewThread,
+      loadThread,
+      deleteThread,
+      savedThreads,
     }),
-    [commandMode, resetThread]
+    [commandMode, resetThread, saveAndNewThread, loadThread, deleteThread, savedThreads]
   )
 
   return (

@@ -39,43 +39,58 @@ export function NavMain({
       <SidebarMenu>
         {items.map((item) => {
           const ItemIcon = item.icon
-          return (
-          <Collapsible
-            key={item.title}
-            defaultOpen={item.isActive}
-            className="group/collapsible"
-            render={<SidebarMenuItem />}
-          >
-            <CollapsibleTrigger
-              render={
+          const hasSubItems = Array.isArray(item.items) && item.items.length > 0
+
+          if (!hasSubItems) {
+            // No sub-items: render as a direct link
+            return (
+              <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   tooltip={item.title}
                   render={<Link href={item.url} />}
-                />
-              }
+                >
+                  {typeof ItemIcon === "function" ? (
+                    <ItemIcon className="size-4" />
+                  ) : (
+                    ItemIcon
+                  )}
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          }
+
+          // Has sub-items: collapsible with a real <button> trigger (no link)
+          return (
+            <Collapsible
+              key={item.title}
+              defaultOpen={item.isActive}
+              className="group/collapsible"
+              render={<SidebarMenuItem />}
             >
-              {typeof ItemIcon === "function" ? (
-                <ItemIcon className="size-4" />
-              ) : (
-                ItemIcon
-              )}
-              <span>{item.title}</span>
-              {item.items && item.items.length > 0 && (
+              <CollapsibleTrigger
+                render={<SidebarMenuButton tooltip={item.title} />}
+              >
+                {typeof ItemIcon === "function" ? (
+                  <ItemIcon className="size-4" />
+                ) : (
+                  ItemIcon
+                )}
+                <span>{item.title}</span>
                 <RiArrowRightSLine className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-              )}
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <SidebarMenuSub>
-                {item.items?.map((subItem) => (
-                  <SidebarMenuSubItem key={subItem.title}>
-                    <SidebarMenuSubButton render={<a href={subItem.url} />}>
-                      <span>{subItem.title}</span>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                ))}
-              </SidebarMenuSub>
-            </CollapsibleContent>
-          </Collapsible>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarMenuSub>
+                  {item.items?.map((subItem) => (
+                    <SidebarMenuSubItem key={subItem.title}>
+                      <SidebarMenuSubButton render={<Link href={subItem.url} />}>
+                        <span>{subItem.title}</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  ))}
+                </SidebarMenuSub>
+              </CollapsibleContent>
+            </Collapsible>
           )
         })}
       </SidebarMenu>

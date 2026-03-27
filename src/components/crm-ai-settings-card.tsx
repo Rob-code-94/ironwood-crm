@@ -116,6 +116,7 @@ export function CrmAiSettingsCard() {
                 value={sessionKey}
                 onChange={(e) => setSessionKey(e.target.value)}
                 className="font-mono text-sm"
+                suppressHydrationWarning
               />
             </div>
             <div className="flex flex-wrap gap-2">
