@@ -5,7 +5,7 @@ import * as React from "react"
 import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
 import { NavUser } from "@/components/nav-user"
-import { TeamSwitcher } from "@/components/team-switcher"
+import { SidebarBrand } from "@/components/sidebar-brand"
 import { ProjectSwitcher } from "@/components/project-switcher"
 import { useWorkspace } from "@/lib/workspace/context"
 import { cn } from "@/lib/utils"
@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/sidebar"
 import {
   RiGalleryLine,
-  RiPulseLine,
   RiCommandLine,
   RiTerminalBoxLine,
   RiRobotLine,
@@ -26,39 +25,14 @@ import {
   RiSettingsLine,
   RiPieChartLine,
   RiToolsLine,
-  RiChatSmileAiLine,
 } from "@remixicon/react"
 
-// This is sample data.
 const data = {
   user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
+    name: "Ironwood",
+    email: "Workspace",
+    avatar: "",
   },
-  teams: [
-    {
-      name: "Acme Inc",
-      logo: (
-        <RiGalleryLine />
-      ),
-      plan: "Enterprise",
-    },
-    {
-      name: "Acme Corp.",
-      logo: (
-        <RiPulseLine />
-      ),
-      plan: "Startup",
-    },
-    {
-      name: "Evil Corp.",
-      logo: (
-        <RiCommandLine />
-      ),
-      plan: "Free",
-    },
-  ],
   navMain: [
     {
       title: "Dashboard",
@@ -75,11 +49,6 @@ const data = {
           url: "/analytics",
         },
       ],
-    },
-    {
-      title: "Assistant",
-      url: "/assistant",
-      icon: RiChatSmileAiLine,
     },
     {
       title: "Tasks",
@@ -215,7 +184,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
-        <TeamSwitcher teams={data.teams} />
+        <SidebarBrand />
       </SidebarHeader>
       <ProjectSwitcher />
       <SidebarContent>

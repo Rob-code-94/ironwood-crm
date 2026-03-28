@@ -1,6 +1,6 @@
 ---
-description: UI components follow coss ui (MIT registry) + Base UI
-globs: src/components/ui/**/*.tsx,src/app/**/*.css
+description: 
+globs: src/components/ui/**/*.tsx, src/app/**/*.css
 alwaysApply: false
 ---
 

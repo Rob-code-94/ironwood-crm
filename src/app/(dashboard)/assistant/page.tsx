@@ -74,7 +74,9 @@ function ThreadSection() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">No messages yet. Start chatting in the right panel.</p>
+          <p className="text-xs text-muted-foreground">
+            No messages yet. Conversation history appears here after you use the assistant from the app.
+          </p>
         )}
       </CardContent>
     </Card>
@@ -213,7 +215,7 @@ export default function AssistantPage() {
           <h1 className="text-3xl font-bold tracking-tight">Assistant</h1>
         </div>
         <p className="mt-2 text-muted-foreground">
-          Manage your AI assistant — configure agents, view chat history, and set up your API key. The chat panel is on the right.
+          Manage your AI assistant — configure agents, view recent thread activity, and set up your API key.
         </p>
       </div>
 

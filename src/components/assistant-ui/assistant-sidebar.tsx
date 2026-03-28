@@ -1,8 +1,7 @@
 "use client"
 
 /**
- * AssistantSidebar is now a simple layout passthrough.
- * The Thread renders inside AssistantModalPrimitive.Content in dashboard-inset-shell.tsx.
+ * AssistantSidebar is a layout passthrough for assistant UI when embedded in a parent layout.
  */
 export function AssistantSidebar({ children }: { children: React.ReactNode }) {
   return (

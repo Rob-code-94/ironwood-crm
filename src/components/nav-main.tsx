@@ -16,8 +16,12 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { RiArrowRightSLine } from "@remixicon/react"
+
+const navLinkClass =
+  "flex size-full min-w-0 items-center gap-2 overflow-hidden outline-none"
 
 export function NavMain({
   items,
@@ -33,6 +37,9 @@ export function NavMain({
     }[]
   }[]
 }) {
+  const { state } = useSidebar()
+  const isCollapsed = state === "collapsed"
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>
@@ -47,7 +54,7 @@ export function NavMain({
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   tooltip={item.title}
-                  render={<Link href={item.url} />}
+                  render={<Link href={item.url} className={navLinkClass} />}
                 >
                   {typeof ItemIcon === "function" ? (
                     <ItemIcon className="size-4" />
@@ -60,7 +67,26 @@ export function NavMain({
             )
           }
 
-          // Has sub-items: collapsible with a real <button> trigger (no link)
+          // Icon / collapsed rail: submenus are hidden — navigate to the section root instead.
+          if (isCollapsed) {
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  render={<Link href={item.url} className={navLinkClass} />}
+                >
+                  {typeof ItemIcon === "function" ? (
+                    <ItemIcon className="size-4" />
+                  ) : (
+                    ItemIcon
+                  )}
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          }
+
+          // Expanded: collapsible with a real <button> trigger (no link)
           return (
             <Collapsible
               key={item.title}
