@@ -86,12 +86,20 @@ export default function DocumentsPage() {
         : ["doc", "docx"].includes(ext ?? "") ? "document"
         : "other"
 
+      const pid =
+        effectiveProjectFilter !== "all" ? effectiveProjectFilter : undefined
       addDocument({
         name: file.name,
         url: null,
         size: file.size,
         type,
         uploadedAt: new Date().toISOString().split("T")[0],
+        ...(pid
+          ? {
+              projectId: pid,
+              projectName: projects.find((p) => p.id === pid)?.name,
+            }
+          : {}),
       })
     })
 

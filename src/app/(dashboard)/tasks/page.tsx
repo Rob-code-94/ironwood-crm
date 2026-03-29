@@ -14,12 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, MagnifyingGlass, Funnel } from "@phosphor-icons/react/dist/ssr"
+import { Plus, MagnifyingGlass, Funnel, Trash } from "@phosphor-icons/react/dist/ssr"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 import { CreateTaskDialog } from "@/components/create-task-dialog"
-import { TaskPriorityBadge, TaskStatusBadge } from "@/components/task-badges"
+import { TaskDetailDialog } from "@/components/task-detail-dialog"
+import { TaskPriorityBadge } from "@/components/task-badges"
+import { TaskStatusSelect } from "@/components/task-status-select"
 import { ResourceLinks } from "@/components/resource-links"
-import type { TaskStatus } from "@/lib/types"
+import { toast } from "sonner"
 
 const ASSIGNED_PROJECT_NAMES = new Set(["Internal Tools", "Client Portal"])
 
@@ -39,12 +41,23 @@ export default function TasksPage() {
     projects,
     selectedProjectFilterId,
     updateTask,
+    deleteTask,
   } = useWorkspace()
 
   const [searchQuery, setSearchQuery] = useState("")
   const [filterPriority, setFilterPriority] = useState("all")
   const [activeTab, setActiveTab] = useState("all")
   const [createOpen, setCreateOpen] = useState(false)
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
+
+  const detailTask = useMemo(
+    () => (detailTaskId ? tasks.find((t) => t.id === detailTaskId) ?? null : null),
+    [tasks, detailTaskId]
+  )
+
+  useEffect(() => {
+    if (detailTaskId && !detailTask) setDetailTaskId(null)
+  }, [detailTaskId, detailTask])
 
   useEffect(() => {
     const f = searchParams.get("filter")
@@ -109,6 +122,9 @@ export default function TasksPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
           <p className="text-muted-foreground mt-1">Manage and track all your tasks</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Click a task title to open details (description, links, tags).
+          </p>
           {selectedProjectFilterId !== ALL_PROJECTS_FILTER && (
             <p className="text-xs text-muted-foreground mt-1">
               Filtered by project:{" "}
@@ -184,6 +200,10 @@ export default function TasksPage() {
                 <SelectItem value="low">Low</SelectItem>
               </SelectContent>
             </Select>
+            <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus size={16} />
+              Add task
+            </Button>
           </div>
 
           <Card>
@@ -197,8 +217,9 @@ export default function TasksPage() {
                         <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Project</th>
                         <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Links</th>
                         <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Priority</th>
-                        <th className="px-4 py-3 text-left font-medium">Status</th>
+                        <th className="px-4 py-3 text-left font-medium min-w-[9.5rem]">Status</th>
                         <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
+                        <th className="px-4 py-3 text-right font-medium w-[1%]">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -208,7 +229,14 @@ export default function TasksPage() {
                           className={i < filteredTasks.length - 1 ? "border-b" : ""}
                         >
                           <td className="px-4 py-3">
-                            <div className="font-medium">{task.title}</div>
+                            <button
+                              type="button"
+                              className="text-left font-medium text-foreground hover:underline underline-offset-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              title="View task details"
+                              onClick={() => setDetailTaskId(task.id)}
+                            >
+                              {task.title}
+                            </button>
                             <ResourceLinks links={task.links} compact className="mt-1 md:hidden" />
                           </td>
                           <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
@@ -220,35 +248,31 @@ export default function TasksPage() {
                           <td className="px-4 py-3 hidden lg:table-cell">
                             <TaskPriorityBadge priority={task.priority} />
                           </td>
-                          <td className="px-4 py-3">
-                            <Select
+                          <td className="px-4 py-3 align-middle">
+                            <TaskStatusSelect
                               value={task.status}
-                              onValueChange={(v) => {
-                                if (v != null)
-                                  updateTask(task.id, { status: v as TaskStatus })
-                              }}
-                            >
-                              <SelectTrigger className="h-8 w-[140px] border-0 shadow-none px-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(
-                                  [
-                                    "todo",
-                                    "in-progress",
-                                    "review",
-                                    "done",
-                                  ] as TaskStatus[]
-                                ).map((s) => (
-                                  <SelectItem key={s} value={s}>
-                                    {s.replace("-", " ")}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              onChange={(status) => updateTask(task.id, { status })}
+                            />
                           </td>
                           <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                             {task.dueDate ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground hover:text-destructive"
+                              aria-label={`Delete task: ${task.title}`}
+                              onClick={() => {
+                                if (!window.confirm(`Delete “${task.title}”?`)) return
+                                deleteTask(task.id)
+                                if (detailTaskId === task.id) setDetailTaskId(null)
+                                toast.success("Task deleted")
+                              }}
+                            >
+                              <Trash size={18} />
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -266,6 +290,13 @@ export default function TasksPage() {
       </Tabs>
 
       <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <TaskDetailDialog
+        task={detailTask}
+        open={detailTaskId !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailTaskId(null)
+        }}
+      />
     </div>
   )
 }

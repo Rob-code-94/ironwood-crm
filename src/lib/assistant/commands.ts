@@ -49,7 +49,8 @@ export const SLASH_COMMANDS = [
 
 export function parseCommandsAndMentions(text: string): CommandMatch | null {
   const commandRegex = /\/(\w+)/g
-  const mentionRegex = /@(\w+(?:\s+\w+)*)/g
+  /** Names may include hyphens/dots (e.g. project slugs); allow spaced segments */
+  const mentionRegex = /@([\w.-]+(?:\s+[\w.-]+)*)/g
   let match: CommandMatch | null = null
   let commandMatch: RegExpExecArray | null = null
   let mentionMatch: RegExpExecArray | null = null
@@ -86,4 +87,33 @@ export function getCommandContext(match: CommandMatch) {
     mentionedClient: match.trigger === "@" ? match.text : null,
     trigger: match.trigger,
   }
+}
+
+/**
+ * Prefixes user text so the CRM adapter can detect plan mode and mention focus
+ * (same convention as `/api/assistant/chat`).
+ */
+export function enrichUserTextWithSlashAtMetadata(content: string): string {
+  const match = parseCommandsAndMentions(content)
+  if (!match) return content
+  const ctx = getCommandContext(match)
+  let result = content
+  if (ctx.mentionedClient) {
+    result = `[Mention: ${ctx.mentionedClient}] ${result}`
+  }
+  if (ctx.commandType) {
+    result = `[Command: ${ctx.commandType}] ${result}`
+  }
+  return result
+}
+
+/** Remove leading [Mention: …] / [Command: …] tags (e.g. before execute-command). */
+export function stripSlashAtMetadata(content: string): string {
+  let s = content.trimStart()
+  for (;;) {
+    const m = s.match(/^\[(?:Mention|Command):\s*[^\]]+\]\s*/)
+    if (!m) break
+    s = s.slice(m[0].length)
+  }
+  return s.trimStart()
 }

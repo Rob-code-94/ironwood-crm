@@ -62,6 +62,7 @@ import {
   type CrmAiModelId,
 } from "@/lib/crm-ai-settings"
 import { useCrmAssistantUi } from "@/components/crm-assistant-provider"
+import { ComposerSlashAtInput } from "@/components/assistant-ui/composer-slash-at-input"
 
 const MarkdownText: TextMessagePartComponent = () => (
   <MarkdownTextPrimitive className="aui-md max-w-none text-foreground [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded-sm [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5" />
@@ -303,7 +304,7 @@ function UserAttachmentTile() {
 
 function UserMessageAttachments() {
   return (
-    <div className="col-start-1 flex flex-wrap content-start gap-2">
+    <div className="flex w-full flex-wrap justify-end gap-2">
       <MessagePrimitive.Attachments
         components={{
           Image: UserAttachmentTile,
@@ -385,7 +386,9 @@ function ThreadWelcome() {
           How can I help you today?
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
-          Drag files into the composer below or use the + button to attach documents and images.
+          Drag files into the composer below or use the + button to attach documents and images
+          (including HTML). Extracted text stays in this thread—follow-up messages can refer to “the
+          file” without uploading again.
         </p>
       </div>
       <div className="grid w-full gap-2 md:grid-cols-2">
@@ -423,7 +426,7 @@ function Composer() {
     <ComposerPrimitive.Root className="flex w-full flex-col gap-0">
       <ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col gap-2 rounded-2xl border border-input bg-background p-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-dashed data-[dragging=true]:border-primary/50 data-[dragging=true]:bg-muted/40">
         <ComposerAttachments />
-        <ComposerPrimitive.Input
+        <ComposerSlashAtInput
           placeholder="Send a message…"
           className="min-h-12 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           rows={1}
@@ -485,21 +488,21 @@ function ComposerAction() {
 function UserMessage() {
   return (
     <MessagePrimitive.Root
-      className="mx-auto grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-1 py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
+      className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col items-end gap-2 px-1 py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
       data-role="user"
     >
       <UserMessageAttachments />
 
-      <div className="relative col-start-2 min-w-0">
+      <div className="relative max-w-[min(100%,42rem)] min-w-0">
+        <div className="absolute top-1/2 right-full hidden pr-2 sm:block -translate-y-1/2">
+          <UserActionBar />
+        </div>
         <div className="rounded-2xl bg-muted px-4 py-2.5 break-words text-foreground">
           <MessagePrimitive.Parts />
         </div>
-        <div className="absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2">
-          <UserActionBar />
-        </div>
       </div>
 
-      <BranchPicker className="col-span-full col-start-1 row-start-3 -mr-1 justify-end" />
+      <BranchPicker className="w-full justify-end pr-1" />
     </MessagePrimitive.Root>
   )
 }
@@ -524,7 +527,7 @@ function EditComposer() {
   return (
     <MessagePrimitive.Root className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col px-2 py-3">
       <ComposerPrimitive.Root className="ml-auto flex w-full max-w-[85%] flex-col rounded-2xl bg-muted">
-        <ComposerPrimitive.Input
+        <ComposerSlashAtInput
           className="min-h-14 w-full resize-none bg-transparent p-4 text-foreground text-sm outline-none"
           autoFocus
         />

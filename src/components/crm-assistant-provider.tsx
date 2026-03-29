@@ -80,11 +80,6 @@ function CrmAssistantRuntime({
   children: ReactNode
 }) {
   const { addTask, addProject, selectedProjectFilterId, projects } = useWorkspace()
-  // Keep a ref so the task-creation callback always uses the latest project filter
-  const selectedProjectRef = useRef<string>(selectedProjectFilterId)
-  useEffect(() => {
-    selectedProjectRef.current = selectedProjectFilterId
-  }, [selectedProjectFilterId])
   const onApplyPendingWorkspaceRef = useRef<
     | ((batch: { tasks: CreatedCommandTask[]; projects: CreatedCommandProject[] }) => void)
     | undefined
@@ -93,9 +88,8 @@ function CrmAssistantRuntime({
   useEffect(() => {
     onApplyPendingWorkspaceRef.current = (batch) => {
       const { tasks, projects: projectsToAdd } = batch
-      const filterId = selectedProjectRef.current
-      const selectedProjectId =
-        filterId !== ALL_PROJECTS_FILTER ? filterId : undefined
+
+      const validExistingIds = new Set(projects.map((p) => p.id))
 
       let firstNewProjectId: string | undefined
       for (const p of projectsToAdd) {
@@ -109,36 +103,71 @@ function CrmAssistantRuntime({
         if (!firstNewProjectId) firstNewProjectId = created.id
       }
 
-      const taskProjectId = selectedProjectId ?? firstNewProjectId
+      const onlyNewProjectBundle =
+        projectsToAdd.length === 1 &&
+        tasks.length > 0 &&
+        tasks.every((t) => !t.projectId)
 
       for (const t of tasks) {
+        let projectId =
+          t.projectId && validExistingIds.has(t.projectId) ? t.projectId : undefined
+
+        if (projectId === undefined && onlyNewProjectBundle && firstNewProjectId) {
+          projectId = firstNewProjectId
+        }
+
         addTask({
           title: t.title,
           description: t.description,
           priority: "medium",
           dueDate: t.dueDate,
-          projectId: taskProjectId,
+          projectId,
           section: t.section,
           links: t.links?.length ? t.links : undefined,
         })
       }
     }
-  }, [addTask, addProject])
+  }, [addTask, addProject, projects])
+
+  const projectsCatalog = useMemo(
+    () =>
+      projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.description?.trim() ? { description: p.description.trim() } : {}),
+      })),
+    [projects]
+  )
 
   const workspaceContext = useMemo(() => {
     const filterId = selectedProjectFilterId
-    if (!filterId) return "Current project filter: unknown."
+    const filterLine =
+      !filterId
+        ? "Current project filter: unknown."
+        : filterId === ALL_PROJECTS_FILTER
+          ? "Current project filter: all projects."
+          : (() => {
+              const projectName = projects.find((p) => p.id === filterId)?.name
+              return projectName
+                ? `Current project filter (sidebar): ${projectName}.`
+                : `Current project filter id: ${filterId}.`
+            })()
 
-    if (filterId === ALL_PROJECTS_FILTER) {
-      return "Current project filter: all projects."
+    if (projects.length === 0) {
+      return `${filterLine}\n\nThere are no projects yet. New tasks will be general (unassigned to a project) unless you create a project first.`
     }
 
-    const projectName = projects.find((p) => p.id === filterId)?.name
-    if (!projectName) {
-      return `Current project filter id: ${filterId}.`
-    }
+    const lines = projects.map(
+      (p) =>
+        `- **${p.name}** (id: \`${p.id}\`)${p.description?.trim() ? ` — ${p.description.trim().slice(0, 120)}${p.description.trim().length > 120 ? "…" : ""}` : ""}`
+    )
 
-    return `Current project filter: ${projectName}. When the assistant creates tasks/projects, they will be saved in this project context.`
+    return `${filterLine}
+
+**Projects in this workspace** (the command parser matches tasks to these by id; if unsure it uses **General**):
+${lines.join("\n")}
+
+The user must confirm before any task or project is saved. Prefer **General** when placement is ambiguous.`
   }, [projects, selectedProjectFilterId])
 
   const [commandMode, setCommandMode] = useState(false)
@@ -150,7 +179,8 @@ function CrmAssistantRuntime({
   const adapter = useCrmChatModelAdapter(
     commandModeRef,
     onApplyPendingWorkspaceRef,
-    workspaceContext
+    workspaceContext,
+    projectsCatalog
   )
 
   const attachments = useMemo(

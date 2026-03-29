@@ -25,6 +25,22 @@ export interface Project {
   dueDate?: string
   /** Arbitrary key-value labels for any vertical (e.g. IDs, codes) */
   customFields?: Record<string, string>
+  /**
+   * Saved logins for this project (local workspace only, not encrypted).
+   * Prefer a real password manager for highly sensitive accounts.
+   */
+  passwordEntries?: ProjectPasswordEntry[]
+  /** @deprecated Use `passwordEntries`; migrated automatically in the project UI */
+  passwordVault?: string
+}
+
+export interface ProjectPasswordEntry {
+  id: string
+  /** e.g. "CAQH ProView" */
+  label?: string
+  login?: string
+  password?: string
+  url?: string
 }
 
 export interface Task {
