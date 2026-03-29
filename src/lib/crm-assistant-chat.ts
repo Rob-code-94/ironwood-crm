@@ -19,6 +19,8 @@ export type CreatedCommandTask = {
   title: string
   dueDate?: string
   description?: string
+  section?: string
+  links?: { label: string; href: string }[]
 }
 
 export type CreatedCommandProject = {
@@ -49,7 +51,13 @@ export class FallbackDocumentAttachmentAdapter implements AttachmentAdapter {
     try {
       const fd = new FormData()
       fd.set("file", attachment.file)
-      fd.set("instructions", "Summarize key points, list action items with any dates mentioned.")
+      const isHtml = /\.html?$/i.test(attachment.name)
+      fd.set(
+        "instructions",
+        isHtml
+          ? "Extract structured checklists, phases, headings, links, phone numbers, and action items from this HTML (including text inside scripts). Preserve group names for sections."
+          : "Summarize key points, list action items with any dates mentioned."
+      )
       fd.set("model", getStoredCrmAiModel())
       const res = await fetch("/api/process-file", { method: "POST", body: fd })
       if (res.ok) {
@@ -163,7 +171,8 @@ function formatCommandReply(data: {
   if (data.tasks.length) {
     lines.push("", "**Tasks:**")
     data.tasks.forEach((t, i) => {
-      lines.push(`${i + 1}. ${t.title}${t.dueDate ? ` — due ${t.dueDate}` : ""}`)
+      const sec = t.section ? ` [${t.section}]` : ""
+      lines.push(`${i + 1}. ${t.title}${sec}${t.dueDate ? ` — due ${t.dueDate}` : ""}`)
     })
   }
   if (data.success && (data.tasks.length || data.projects.length)) {
@@ -178,6 +187,40 @@ function formatCommandReply(data: {
 }
 
 const TASK_INTENT_RE = /\b(tasks?|action items?|create|add|extract|to-?do|review|breakdown|list|organize|analyze)\b/i
+
+const FILE_PROTOCOL_RE = /\bfile:\/\//i
+
+/** User wants tasks/projects built from an attached file or fetched page */
+function wantsWorkFromSource(userText: string): boolean {
+  if (TASK_INTENT_RE.test(userText)) return true
+  if (/\b(project|projects|program|initiative|playbook|roadmap)\b/i.test(userText)) return true
+  if (/\bturn\s+(this|that|it)\s+into\b/i.test(userText)) return true
+  if (/\b(build|generate|populate|ingest)\b/i.test(userText)) return true
+  return false
+}
+
+function firstHttpUrl(text: string): string | null {
+  const m = text.match(/https?:\/\/[^\s<>"')]+/i)
+  return m ? m[0] : null
+}
+
+function resolveCommandTypeHint(userText: string): string | undefined {
+  const projectish = /\b(project|projects|program|initiative|playbook|workspace)\b/i.test(
+    userText
+  )
+  const taskish = /\b(tasks?|action items?|to-?dos?|checklist|steps?)\b/i.test(userText)
+  if (projectish && !taskish) return "create-project"
+  if (taskish && !projectish) return "create-tasks"
+  return undefined
+}
+
+const MAX_INGEST_COMMAND_CHARS = 100_000
+
+function truncateForCommand(s: string): string {
+  if (s.length <= MAX_INGEST_COMMAND_CHARS) return s
+  const half = Math.floor(MAX_INGEST_COMMAND_CHARS / 2) - 80
+  return `${s.slice(0, half)}\n\n[... middle truncated ...]\n\n${s.slice(-half)}`
+}
 
 const CONFIRM_RE = /^(yes|yep|ok|okay|proceed|go ahead|continue)\b/i
 const CANCEL_RE = /^(no|nope|cancel|stop|never mind)\b/i
@@ -202,9 +245,9 @@ function hasDocumentAttachments(messages: readonly ThreadMessage[]): boolean {
 
 export function useCrmChatModelAdapter(
   commandModeRef: React.MutableRefObject<boolean>,
-  onTasksCreatedRef: React.MutableRefObject<((tasks: CreatedCommandTask[]) => void) | undefined>,
-  onProjectsCreatedRef: React.MutableRefObject<
-    ((projects: CreatedCommandProject[]) => void) | undefined
+  onApplyPendingWorkspaceRef: React.MutableRefObject<
+    | ((batch: { tasks: CreatedCommandTask[]; projects: CreatedCommandProject[] }) => void)
+    | undefined
   >,
   workspaceContext?: string
 ): ChatModelAdapter {
@@ -222,6 +265,19 @@ export function useCrmChatModelAdapter(
         // - It only persists them after the user replies with "yes/ok/proceed".
         const lastUserTextValue = lastUserText(options.messages)
         const hasPendingActions = pendingActionsRef.current !== null
+
+        if (!hasPendingActions && FILE_PROTOCOL_RE.test(lastUserTextValue)) {
+          yield {
+            content: [
+              {
+                type: "text",
+                text: 'Local `file://` links cannot be opened from the browser. Use the **Attach file** button in the composer and upload the file, then ask again (for example: “Create a project and tasks from this”).',
+              },
+            ],
+          }
+          return
+        }
+
         if (hasPendingActions) {
           if (CONFIRM_RE.test(lastUserTextValue)) {
             const pending = pendingActionsRef.current
@@ -229,11 +285,14 @@ export function useCrmChatModelAdapter(
 
             if (!pending) return
 
-            if (pending.tasks.length && onTasksCreatedRef.current) {
-              onTasksCreatedRef.current(pending.tasks)
-            }
-            if (pending.projects.length && onProjectsCreatedRef.current) {
-              onProjectsCreatedRef.current(pending.projects)
+            if (
+              (pending.tasks.length || pending.projects.length) &&
+              onApplyPendingWorkspaceRef.current
+            ) {
+              onApplyPendingWorkspaceRef.current({
+                tasks: pending.tasks,
+                projects: pending.projects,
+              })
             }
 
             yield {
@@ -328,11 +387,13 @@ export function useCrmChatModelAdapter(
           }
           const activeAgentForCmd = getActiveAgent()
           const cmdModel = activeAgentForCmd ? activeAgentForCmd.model : getStoredCrmAiModel()
+          const cmdHint = resolveCommandTypeHint(text)
           const res = await fetch("/api/execute-command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               command: text,
+              ...(cmdHint ? { commandType: cmdHint } : {}),
               model: cmdModel,
             }),
             signal: options.abortSignal,
@@ -399,19 +460,29 @@ export function useCrmChatModelAdapter(
           return
         }
 
-        // Auto-route: when a document is attached and the user's message has task intent,
-        // pipe to /api/execute-command to create tasks — no manual command mode toggle needed.
+        // Auto-route: attached document + intent to build tasks/projects → execute-command
         const userText = lastUserText(options.messages)
-        if (!hasPendingActions && hasDocumentAttachments(options.messages) && TASK_INTENT_RE.test(userText)) {
-          const fullCommand = threadMessagesToApi(options.messages)
-            .map((m) => m.content)
-            .join("\n")
+        if (
+          !hasPendingActions &&
+          hasDocumentAttachments(options.messages) &&
+          wantsWorkFromSource(userText)
+        ) {
+          const fullCommand = truncateForCommand(
+            threadMessagesToApi(options.messages)
+              .map((m) => m.content)
+              .join("\n")
+          )
           const activeAgentForDoc = getActiveAgent()
           const docModel = activeAgentForDoc ? activeAgentForDoc.model : getStoredCrmAiModel()
+          const docHint = resolveCommandTypeHint(userText)
           const docRes = await fetch("/api/execute-command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command: fullCommand, commandType: "create-tasks", model: docModel }),
+            body: JSON.stringify({
+              command: fullCommand,
+              ...(docHint ? { commandType: docHint } : {}),
+              model: docModel,
+            }),
             signal: options.abortSignal,
           })
           const docData = (await docRes.json()) as {
@@ -463,6 +534,125 @@ export function useCrmChatModelAdapter(
             ],
           }
           return
+        }
+
+        // URL in message (no attachment): fetch page → same parser as document ingest
+        if (
+          !hasPendingActions &&
+          !commandModeRef.current &&
+          !hasDocumentAttachments(options.messages) &&
+          wantsWorkFromSource(userText)
+        ) {
+          const pageUrl = firstHttpUrl(userText)
+          if (pageUrl) {
+            const ingestRes = await fetch("/api/fetch-url", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: pageUrl }),
+              signal: options.abortSignal,
+            })
+            const ingestJson = (await ingestRes.json().catch(() => ({}))) as {
+              markdown?: string
+              error?: string
+            }
+            if (!ingestRes.ok) {
+              yield {
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      typeof ingestJson.error === "string"
+                        ? ingestJson.error
+                        : "Could not fetch that URL.",
+                  },
+                ],
+              }
+              return
+            }
+            const md =
+              typeof ingestJson.markdown === "string" && ingestJson.markdown.trim()
+                ? ingestJson.markdown.trim()
+                : "(empty)"
+            const urlCommand = truncateForCommand(
+              `User request:\n${userText}\n\nFetched page (${pageUrl}):\n${md}`
+            )
+            const activeAgentForUrl = getActiveAgent()
+            const urlModel = activeAgentForUrl ? activeAgentForUrl.model : getStoredCrmAiModel()
+            const urlHint = resolveCommandTypeHint(userText)
+            const urlExecRes = await fetch("/api/execute-command", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                command: urlCommand,
+                ...(urlHint ? { commandType: urlHint } : {}),
+                model: urlModel,
+              }),
+              signal: options.abortSignal,
+            })
+            const urlData = (await urlExecRes.json()) as {
+              success?: boolean
+              message?: string
+              tasks?: CreatedCommandTask[]
+              projects?: CreatedCommandProject[]
+              error?: string
+            }
+            if (!urlExecRes.ok) {
+              yield {
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      typeof urlData.error === "string"
+                        ? urlData.error
+                        : "Command request failed.",
+                  },
+                ],
+              }
+              return
+            }
+            const urlTasks = Array.isArray(urlData.tasks) ? urlData.tasks : []
+            const urlProjects = Array.isArray(urlData.projects) ? urlData.projects : []
+
+            if (urlData.success && (urlTasks.length || urlProjects.length)) {
+              pendingActionsRef.current = {
+                tasks: urlTasks,
+                projects: urlProjects,
+                message: typeof urlData.message === "string" ? urlData.message : undefined,
+              }
+              yield {
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      typeof urlData.message === "string" ? urlData.message : "I’m ready to make changes.",
+                      "",
+                      `Proposed changes:`,
+                      urlTasks.length ? `- Add ${urlTasks.length} task(s).` : `- No tasks to add.`,
+                      urlProjects.length ? `- Add ${urlProjects.length} project(s).` : `- No projects to add.`,
+                      "",
+                      `Reply "yes" to confirm, or "no" to cancel.`,
+                    ].join("\n"),
+                  },
+                ],
+              }
+              return
+            }
+
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: formatCommandReply({
+                    success: Boolean(urlData.success),
+                    message: typeof urlData.message === "string" ? urlData.message : "Done.",
+                    tasks: urlTasks,
+                    projects: urlProjects,
+                  }),
+                },
+              ],
+            }
+            return
+          }
         }
 
         const messages = threadMessagesToApi(options.messages)
@@ -532,6 +722,6 @@ export function useCrmChatModelAdapter(
         return
       },
     }),
-    [commandModeRef, onTasksCreatedRef, onProjectsCreatedRef, workspaceContext]
+    [commandModeRef, onApplyPendingWorkspaceRef, workspaceContext]
   )
 }

@@ -49,6 +49,8 @@ export async function POST(req: Request) {
       title: t.title,
       dueDate: t.dueDate,
       description: t.description,
+      section: t.section,
+      links: t.links,
     }))
 
     const projects = parsed.projects.map((p) => ({

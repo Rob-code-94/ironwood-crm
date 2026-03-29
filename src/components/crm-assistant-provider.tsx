@@ -85,44 +85,45 @@ function CrmAssistantRuntime({
   useEffect(() => {
     selectedProjectRef.current = selectedProjectFilterId
   }, [selectedProjectFilterId])
-  const onTasksCreatedRef = useRef<((tasks: CreatedCommandTask[]) => void) | undefined>(
-    undefined
-  )
-  const onProjectsCreatedRef = useRef<
-    ((projects: CreatedCommandProject[]) => void) | undefined
+  const onApplyPendingWorkspaceRef = useRef<
+    | ((batch: { tasks: CreatedCommandTask[]; projects: CreatedCommandProject[] }) => void)
+    | undefined
   >(undefined)
 
   useEffect(() => {
-    onTasksCreatedRef.current = (tasks) => {
-      const projectId =
-        selectedProjectRef.current !== ALL_PROJECTS_FILTER
-          ? selectedProjectRef.current
-          : undefined
+    onApplyPendingWorkspaceRef.current = (batch) => {
+      const { tasks, projects: projectsToAdd } = batch
+      const filterId = selectedProjectRef.current
+      const selectedProjectId =
+        filterId !== ALL_PROJECTS_FILTER ? filterId : undefined
+
+      let firstNewProjectId: string | undefined
+      for (const p of projectsToAdd) {
+        const color = p.color && isHexColor(p.color) ? p.color.trim() : "#6366f1"
+        const created = addProject({
+          name: p.name,
+          description: p.description,
+          color,
+          category: p.category,
+        })
+        if (!firstNewProjectId) firstNewProjectId = created.id
+      }
+
+      const taskProjectId = selectedProjectId ?? firstNewProjectId
+
       for (const t of tasks) {
         addTask({
           title: t.title,
           description: t.description,
           priority: "medium",
           dueDate: t.dueDate,
-          projectId,
+          projectId: taskProjectId,
+          section: t.section,
+          links: t.links?.length ? t.links : undefined,
         })
       }
     }
-  }, [addTask])
-
-  useEffect(() => {
-    onProjectsCreatedRef.current = (projects) => {
-      for (const p of projects) {
-        const color = p.color && isHexColor(p.color) ? p.color.trim() : "#6366f1"
-        addProject({
-          name: p.name,
-          description: p.description,
-          color,
-          category: p.category,
-        })
-      }
-    }
-  }, [addProject])
+  }, [addTask, addProject])
 
   const workspaceContext = useMemo(() => {
     const filterId = selectedProjectFilterId
@@ -148,8 +149,7 @@ function CrmAssistantRuntime({
 
   const adapter = useCrmChatModelAdapter(
     commandModeRef,
-    onTasksCreatedRef,
-    onProjectsCreatedRef,
+    onApplyPendingWorkspaceRef,
     workspaceContext
   )
 

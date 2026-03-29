@@ -1,5 +1,6 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { convertToModelMessages, stepCountIs, streamText, type ToolSet } from "ai"
+import { getGoogleApiKeyFromRequest } from "@/lib/ai-request"
 import { createAssistantTools } from "@/lib/assistant/chat-tools"
 import { getCommandContext, parseCommandsAndMentions } from "@/lib/assistant/commands"
 import { THINKING_MODELS, VALID_MODEL_IDS } from "@/lib/assistant/constants"
@@ -9,16 +10,14 @@ export const runtime = "nodejs"
 
 const DEFAULT_MODEL = "gemini-2.5-flash"
 
-function getApiKey(): string | null {
-  const key = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
-  return key?.trim() ? key : null
-}
-
 export async function POST(req: Request) {
-  const apiKey = getApiKey()
+  const apiKey = getGoogleApiKeyFromRequest(req)
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: "Missing GOOGLE_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY" }),
+      JSON.stringify({
+        error:
+          "Missing API key. Set GOOGLE_API_KEY (or GEMINI_API_KEY) in .env.local and restart the dev server, or save a session key in Settings → AI assistant.",
+      }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     )
   }

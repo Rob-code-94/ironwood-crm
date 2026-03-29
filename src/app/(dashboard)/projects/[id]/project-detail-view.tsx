@@ -101,14 +101,17 @@ export function ProjectDetailView() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Workspace labels</CardTitle>
+          <CardTitle className="text-base">Custom fields</CardTitle>
           <p className="text-xs text-muted-foreground font-normal">
-            Optional key-value pairs shown on the dashboard when this project is selected (IDs, codes, etc.).
+            Optional metadata for this project (IDs, codes, client name, etc.). Same format as when you
+            create a project.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="cf">One <code className="text-xs">key: value</code> per line</Label>
+            <Label htmlFor="cf">
+              One <code className="text-xs">name: value</code> per line
+            </Label>
             <Textarea
               id="cf"
               rows={4}
@@ -126,10 +129,10 @@ export function ProjectDetailView() {
               updateProject(id, {
                 customFields: Object.keys(parsed).length ? parsed : undefined,
               })
-              toast.success("Labels saved")
+              toast.success("Custom fields saved")
             }}
           >
-            Save labels
+            Save custom fields
           </Button>
         </CardContent>
       </Card>

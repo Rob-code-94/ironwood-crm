@@ -31,7 +31,9 @@ import {
   seedTasks,
 } from "@/lib/workspace/seed"
 import {
+  isWorkspaceFileSyncEnabled,
   loadWorkspaceSnapshot,
+  normalizeWorkspaceSnapshot,
   saveWorkspaceSnapshot,
   type WorkspaceSnapshotV1,
 } from "@/lib/workspace/persist"
@@ -149,6 +151,42 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   useEffect(() => {
+    if (!isWorkspaceFileSyncEnabled()) return
+    const localPersistedAt = loadWorkspaceSnapshot()?.persistedAt ?? 0
+    let cancelled = false
+    void (async () => {
+      const res = await fetch("/api/workspace/snapshot")
+      if (cancelled) return
+      if (res.status === 503 || res.status === 404) return
+      if (!res.ok) return
+      let raw: unknown
+      try {
+        raw = await res.json()
+      } catch {
+        return
+      }
+      const remote = normalizeWorkspaceSnapshot(raw)
+      if (!remote || cancelled) return
+      const remoteT = remote.persistedAt ?? 0
+      if (remoteT < localPersistedAt) return
+      setProjects(remote.projects)
+      setTasks(remote.tasks)
+      setContacts(remote.contacts)
+      setCompanies(remote.companies)
+      setDeals(remote.deals)
+      setSavedChatTurns(
+        Array.isArray(remote.savedChatTurns) ? remote.savedChatTurns : []
+      )
+      setDocuments(Array.isArray(remote.documents) ? remote.documents : [])
+      setSelectedProjectFilterId(remote.selectedProjectFilterId)
+      saveWorkspaceSnapshot(remote)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     const snapshot: WorkspaceSnapshotV1 = {
       version: 1,
       projects,
@@ -159,8 +197,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectedProjectFilterId,
       savedChatTurns,
       documents,
+      persistedAt: Date.now(),
     }
-    const t = window.setTimeout(() => saveWorkspaceSnapshot(snapshot), 400)
+    const t = window.setTimeout(() => {
+      saveWorkspaceSnapshot(snapshot)
+      if (isWorkspaceFileSyncEnabled()) {
+        void fetch("/api/workspace/snapshot", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(snapshot),
+        })
+      }
+    }, 400)
     return () => window.clearTimeout(t)
   }, [
     projects,

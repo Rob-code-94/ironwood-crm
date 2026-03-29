@@ -20,6 +20,42 @@ export type WorkspaceSnapshotV1 = {
   selectedProjectFilterId: string
   savedChatTurns: SavedChatTurn[]
   documents?: Document[]
+  /** Unix ms - used to pick newer data when syncing to a shared file across worktrees */
+  persistedAt?: number
+}
+
+/** Client-only: enable loading/saving workspace via /api/workspace/snapshot and IRONWOOD_WORKSPACE_FILE. */
+export function isWorkspaceFileSyncEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_IRONWOOD_WORKSPACE_SYNC === "1"
+}
+
+export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 | null {
+  if (!data || typeof data !== "object") return null
+  const d = data as Record<string, unknown>
+  if (d.version !== 1 || !Array.isArray(d.projects)) return null
+  if (!Array.isArray(d.tasks)) return null
+  if (!Array.isArray(d.contacts)) return null
+  if (!Array.isArray(d.companies)) return null
+  if (!Array.isArray(d.deals)) return null
+  if (typeof d.selectedProjectFilterId !== "string") return null
+  const savedChatTurns = Array.isArray(d.savedChatTurns) ? d.savedChatTurns : []
+  const documents = Array.isArray(d.documents) ? d.documents : []
+  const persistedAt =
+    typeof d.persistedAt === "number" && Number.isFinite(d.persistedAt)
+      ? d.persistedAt
+      : undefined
+  return {
+    version: 1,
+    projects: d.projects as Project[],
+    tasks: d.tasks as Task[],
+    contacts: d.contacts as Contact[],
+    companies: d.companies as Company[],
+    deals: d.deals as Deal[],
+    selectedProjectFilterId: d.selectedProjectFilterId,
+    savedChatTurns: savedChatTurns as SavedChatTurn[],
+    documents: documents as Document[],
+    persistedAt,
+  }
 }
 
 export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
@@ -27,11 +63,7 @@ export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
   try {
     const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY)
     if (!raw) return null
-    const data = JSON.parse(raw) as WorkspaceSnapshotV1
-    if (data?.version !== 1 || !Array.isArray(data.projects)) return null
-    if (!Array.isArray(data.savedChatTurns)) data.savedChatTurns = []
-    if (!Array.isArray(data.documents)) data.documents = []
-    return data
+    return normalizeWorkspaceSnapshot(JSON.parse(raw) as unknown)
   } catch {
     return null
   }
