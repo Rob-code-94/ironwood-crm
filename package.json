@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "clean": "rm -rf .next"
+    "clean": "rm -rf .next",
+    "deploy:cloud-run": "bash scripts/deploy-cloud-run.sh"
   },
   "engines": {
     "node": ">=20.9.0"
