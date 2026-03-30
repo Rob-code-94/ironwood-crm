@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { startTransition, useEffect, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -62,20 +62,22 @@ export function CreateTaskDialog({
 
   useEffect(() => {
     if (!open) return
-    setProjectId(defaultProjectId ?? "")
-    setStatus(defaultStatusProp ?? "todo")
-    const pinned = defaultDueDateProp?.trim()
-    if (pinned) {
-      setDueDate(pinned)
-    } else if (
-      taskDefaultDueOffsetDays != null &&
-      Number.isFinite(taskDefaultDueOffsetDays) &&
-      taskDefaultDueOffsetDays >= 0
-    ) {
-      setDueDate(isoDateAddDaysFromToday(taskDefaultDueOffsetDays))
-    } else {
-      setDueDate("")
-    }
+    startTransition(() => {
+      setProjectId(defaultProjectId ?? "")
+      setStatus(defaultStatusProp ?? "todo")
+      const pinned = defaultDueDateProp?.trim()
+      if (pinned) {
+        setDueDate(pinned)
+      } else if (
+        taskDefaultDueOffsetDays != null &&
+        Number.isFinite(taskDefaultDueOffsetDays) &&
+        taskDefaultDueOffsetDays >= 0
+      ) {
+        setDueDate(isoDateAddDaysFromToday(taskDefaultDueOffsetDays))
+      } else {
+        setDueDate("")
+      }
+    })
   }, [open, defaultProjectId, defaultStatusProp, taskDefaultDueOffsetDays, defaultDueDateProp])
 
   function reset() {

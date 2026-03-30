@@ -2,8 +2,16 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Activity, Cpu, Zap } from "lucide-react"
+
+type MemoryInfo = {
+  usedJSHeapSize: number
+  jsHeapSizeLimit: number
+}
+
+type PerformanceWithMemory = Performance & {
+  memory?: MemoryInfo
+}
 
 interface PerformanceMetrics {
   fcp: number
@@ -53,11 +61,15 @@ export function PerformanceMonitor() {
         // Cumulative Layout Shift
         const clsObserver = new PerformanceObserver((list) => {
           let cls = 0
-          list.getEntries().forEach((entry: any) => {
-            if (!entry.hadRecentInput) {
-              cls += entry.value
+          for (const entry of list.getEntries()) {
+            const ls = entry as PerformanceEntry & {
+              hadRecentInput?: boolean
+              value: number
             }
-          })
+            if (!ls.hadRecentInput) {
+              cls += ls.value
+            }
+          }
           onMetric({ name: "CLS", value: cls })
         })
         clsObserver.observe({ entryTypes: ["layout-shift"] })
@@ -71,13 +83,10 @@ export function PerformanceMonitor() {
       }
     }
 
-    // Memory usage (if available)
-    if ((performance as any).memory) {
+    const perf = performance as PerformanceWithMemory
+    if (perf.memory) {
       const memPercent =
-        (((performance as any).memory.usedJSHeapSize /
-          (performance as any).memory.jsHeapSizeLimit) *
-          100) |
-        0
+        ((perf.memory.usedJSHeapSize / perf.memory.jsHeapSizeLimit) * 100) | 0
       onMetric({ name: "Memory", value: memPercent })
     }
   }, [])

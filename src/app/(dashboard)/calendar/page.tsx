@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { startTransition, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -56,19 +56,25 @@ function parseLocalDateParam(value: string | null): Date | undefined {
 export default function CalendarPage() {
   const searchParams = useSearchParams()
   const { tasks, calendarEvents, addCalendarEvent, deleteCalendarEvent } = useWorkspace()
+  const dateFromQuery = searchParams.get("date")
+  const parsedFromQuery = useMemo(
+    () => parseLocalDateParam(dateFromQuery),
+    [dateFromQuery]
+  )
   const [date, setDate] = useState<Date | undefined>(() => new Date())
+
+  useEffect(() => {
+    if (!parsedFromQuery) return
+    startTransition(() => {
+      setDate(parsedFromQuery)
+    })
+  }, [parsedFromQuery])
   const [eventDialogOpen, setEventDialogOpen] = useState(false)
   const [newEvent, setNewEvent] = useState({
     title: "",
     time: "",
     description: "",
   })
-
-  const dateFromQuery = searchParams.get("date")
-  useEffect(() => {
-    const parsed = parseLocalDateParam(dateFromQuery)
-    if (parsed) setDate(parsed)
-  }, [dateFromQuery])
 
   const taskEvents = useMemo((): CalEvent[] => {
     return tasks

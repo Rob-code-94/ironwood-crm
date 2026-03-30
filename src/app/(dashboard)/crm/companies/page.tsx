@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -43,17 +43,17 @@ export default function CompaniesPage() {
   const [editing, setEditing] = useState<Company | null>(null)
   const [editForm, setEditForm] = useState<CompanyForm>({ ...emptyForm })
 
-  useEffect(() => {
-    if (!editing) return
+  function beginEditCompany(company: Company) {
     setEditForm({
-      name: editing.name,
-      website: editing.website ?? "",
-      industry: editing.industry ?? "",
-      size: editing.size ?? "",
-      notes: editing.notes ?? "",
-      metadataLines: recordToKeyValueLines(editing.metadata),
+      name: company.name,
+      website: company.website ?? "",
+      industry: company.industry ?? "",
+      size: company.size ?? "",
+      notes: company.notes ?? "",
+      metadataLines: recordToKeyValueLines(company.metadata),
     })
-  }, [editing])
+    setEditing(company)
+  }
 
   const filtered = companies.filter(
     (c) =>
@@ -265,7 +265,7 @@ export default function CompaniesPage() {
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => setEditing(company)}
+                    onClick={() => beginEditCompany(company)}
                     aria-label={`Edit ${company.name}`}
                   >
                     <PencilSimple size={16} />

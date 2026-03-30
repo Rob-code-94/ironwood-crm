@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,14 +22,13 @@ import { toast } from "sonner"
 import { Key, Robot } from "@phosphor-icons/react"
 
 export function CrmAiSettingsCard() {
-  const [model, setModel] = useState<CrmAiModelId>(DEFAULT_CRM_MODEL)
-  const [systemPrompt, setSystemPrompt] = useState("")
+  const [model, setModel] = useState<CrmAiModelId>(() =>
+    typeof window === "undefined" ? DEFAULT_CRM_MODEL : getStoredCrmAiModel()
+  )
+  const [systemPrompt, setSystemPrompt] = useState(() =>
+    typeof window === "undefined" ? "" : getStoredCrmSystemPrompt()
+  )
   const [sessionKey, setSessionKey] = useState("")
-
-  useEffect(() => {
-    setModel(getStoredCrmAiModel())
-    setSystemPrompt(getStoredCrmSystemPrompt())
-  }, [])
 
   function savePreferences() {
     setStoredCrmAiModel(model)

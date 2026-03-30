@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, startTransition, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -87,7 +87,9 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
 
   useEffect(() => {
     if (!open || !task) return
-    resetFromTask(task)
+    startTransition(() => {
+      resetFromTask(task)
+    })
   }, [open, task?.id, resetFromTask])
 
   const handleSave = () => {

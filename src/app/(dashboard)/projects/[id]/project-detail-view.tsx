@@ -62,6 +62,52 @@ function hrefFromUrlInput(raw: string): string | null {
   return t.startsWith("/") ? t : `https://${t}`
 }
 
+function ProjectCustomFieldsCard({
+  initialLines,
+  onSave,
+}: {
+  initialLines: string
+  onSave: (lines: string) => void
+}) {
+  const [draft, setDraft] = useState(initialLines)
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Custom fields</CardTitle>
+        <p className="text-xs text-muted-foreground font-normal">
+          Optional metadata for this project (IDs, codes, client name, etc.). Same format as when you
+          create a project.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1">
+          <Label htmlFor="cf">
+            One <code className="text-xs">name: value</code> per line
+          </Label>
+          <Textarea
+            id="cf"
+            rows={4}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="font-mono text-sm"
+            placeholder="External ID: ABC-123"
+          />
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            onSave(draft)
+            toast.success("Custom fields saved")
+          }}
+        >
+          Save custom fields
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function ProjectDetailView() {
   const params = useParams()
   const id = typeof params.id === "string" ? params.id : ""
@@ -69,15 +115,10 @@ export function ProjectDetailView() {
     useWorkspace()
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
-  const [customFieldsDraft, setCustomFieldsDraft] = useState("")
   const [passwordReveal, setPasswordReveal] = useState<Record<string, boolean>>({})
   const docInputRef = useRef<HTMLInputElement>(null)
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id])
-
-  useEffect(() => {
-    if (project) setCustomFieldsDraft(recordToKeyValueLines(project.customFields))
-  }, [project?.id])
 
   /** One-time migration from legacy single textarea to structured entries */
   useEffect(() => {
@@ -149,10 +190,6 @@ export function ProjectDetailView() {
     [projectTasks, detailTaskId]
   )
 
-  useEffect(() => {
-    if (detailTaskId && !detailTask) setDetailTaskId(null)
-  }, [detailTaskId, detailTask])
-
   if (!project) {
     return (
       <div className="flex flex-1 flex-col gap-6 p-6">
@@ -210,43 +247,16 @@ export function ProjectDetailView() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Custom fields</CardTitle>
-          <p className="text-xs text-muted-foreground font-normal">
-            Optional metadata for this project (IDs, codes, client name, etc.). Same format as when you
-            create a project.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="cf">
-              One <code className="text-xs">name: value</code> per line
-            </Label>
-            <Textarea
-              id="cf"
-              rows={4}
-              value={customFieldsDraft}
-              onChange={(e) => setCustomFieldsDraft(e.target.value)}
-              className="font-mono text-sm"
-              placeholder="External ID: ABC-123"
-            />
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              const parsed = parseKeyValueLines(customFieldsDraft)
-              updateProject(id, {
-                customFields: Object.keys(parsed).length ? parsed : undefined,
-              })
-              toast.success("Custom fields saved")
-            }}
-          >
-            Save custom fields
-          </Button>
-        </CardContent>
-      </Card>
+      <ProjectCustomFieldsCard
+        key={project.id}
+        initialLines={recordToKeyValueLines(project.customFields)}
+        onSave={(draft) => {
+          const parsed = parseKeyValueLines(draft)
+          updateProject(id, {
+            customFields: Object.keys(parsed).length ? parsed : undefined,
+          })
+        }}
+      />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="md:col-span-2">
@@ -573,7 +583,7 @@ export function ProjectDetailView() {
       />
       <TaskDetailDialog
         task={detailTask}
-        open={detailTaskId !== null}
+        open={detailTask !== null}
         onOpenChange={(next) => {
           if (!next) setDetailTaskId(null)
         }}

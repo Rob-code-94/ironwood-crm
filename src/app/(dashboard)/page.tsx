@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -274,18 +275,18 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="grid gap-2">
-                <a href="/tasks" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
+                <Link href="/tasks" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
                   View All Tasks
-                </a>
-                <a href="/projects" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
+                </Link>
+                <Link href="/projects" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
                   All Projects
-                </a>
-                <a href="/documents" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
+                </Link>
+                <Link href="/documents" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
                   Documents
-                </a>
-                <a href="/calendar" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
+                </Link>
+                <Link href="/calendar" className="px-3 py-2 rounded-md text-sm hover:bg-muted transition-colors block">
                   Calendar
-                </a>
+                </Link>
               </div>
             </CardContent>
           </Card>

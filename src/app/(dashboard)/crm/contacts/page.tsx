@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -51,17 +51,17 @@ export default function ContactsPage() {
   const [editing, setEditing] = useState<Contact | null>(null)
   const [editForm, setEditForm] = useState<ContactForm>({ ...emptyForm })
 
-  useEffect(() => {
-    if (!editing) return
+  function beginEditContact(contact: Contact) {
     setEditForm({
-      name: editing.name,
-      email: editing.email,
-      phone: editing.phone ?? "",
-      company: editing.company ?? "",
-      notes: editing.notes ?? "",
-      metadataLines: recordToKeyValueLines(editing.metadata),
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone ?? "",
+      company: contact.company ?? "",
+      notes: contact.notes ?? "",
+      metadataLines: recordToKeyValueLines(contact.metadata),
     })
-  }, [editing])
+    setEditing(contact)
+  }
 
   const filtered = contacts.filter(
     (c) =>
@@ -299,7 +299,7 @@ export default function ContactsPage() {
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() => setEditing(contact)}
+                      onClick={() => beginEditContact(contact)}
                       aria-label={`Edit ${contact.name}`}
                     >
                       <PencilSimple size={16} />

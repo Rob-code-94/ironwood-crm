@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { startTransition, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent } from "@/components/ui/card"
@@ -36,6 +36,14 @@ function isOverdue(due?: string) {
   return due < todayISO()
 }
 
+function initialTabFromFilter(sp: { get: (k: string) => string | null }) {
+  const f = sp.get("filter")
+  if (f === "my") return "my-tasks"
+  if (f === "assigned") return "assigned"
+  if (f === "overdue") return "overdue"
+  return "all"
+}
+
 export default function TasksPage() {
   const searchParams = useSearchParams()
   const {
@@ -50,10 +58,10 @@ export default function TasksPage() {
 
   const [searchQuery, setSearchQuery] = useState("")
   const [filterPriority, setFilterPriority] = useState("all")
-  const [activeTab, setActiveTab] = useState("all")
+  const [activeTab, setActiveTab] = useState(() => initialTabFromFilter(searchParams))
   const [createOpen, setCreateOpen] = useState(false)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [selectedIdsRaw, setSelectedIdsRaw] = useState<Set<string>>(() => new Set())
   const [bulkDueDate, setBulkDueDate] = useState("")
 
   const detailTask = useMemo(
@@ -62,14 +70,12 @@ export default function TasksPage() {
   )
 
   useEffect(() => {
-    if (detailTaskId && !detailTask) setDetailTaskId(null)
-  }, [detailTaskId, detailTask])
-
-  useEffect(() => {
     const f = searchParams.get("filter")
-    if (f === "my") setActiveTab("my-tasks")
-    else if (f === "assigned") setActiveTab("assigned")
-    else if (f === "overdue") setActiveTab("overdue")
+    let next: "all" | "my-tasks" | "assigned" | "overdue" = "all"
+    if (f === "my") next = "my-tasks"
+    else if (f === "assigned") next = "assigned"
+    else if (f === "overdue") next = "overdue"
+    startTransition(() => setActiveTab(next))
   }, [searchParams])
 
   const scopedTasks = useMemo(() => {
@@ -108,22 +114,17 @@ export default function TasksPage() {
     return filtered
   }, [scopedTasks, activeTab, filterPriority, searchQuery])
 
-  useEffect(() => {
-    const allowed = new Set(filteredTasks.map((t) => t.id))
-    setSelectedIds((prev) => {
-      const next = new Set<string>()
-      for (const id of prev) {
-        if (allowed.has(id)) next.add(id)
-      }
-      if (prev.size === next.size) {
-        for (const id of prev) {
-          if (!next.has(id)) return next
-        }
-        return prev
-      }
-      return next
-    })
-  }, [filteredTasks])
+  const allowedTaskIds = useMemo(
+    () => new Set(filteredTasks.map((t) => t.id)),
+    [filteredTasks]
+  )
+  const selectedIds = useMemo(() => {
+    const next = new Set<string>()
+    for (const id of selectedIdsRaw) {
+      if (allowedTaskIds.has(id)) next.add(id)
+    }
+    return next
+  }, [allowedTaskIds, selectedIdsRaw])
 
   const visibleIds = useMemo(() => filteredTasks.map((t) => t.id), [filteredTasks])
   const allVisibleSelected =
@@ -313,7 +314,7 @@ export default function TasksPage() {
                   size="sm"
                   variant="outline"
                   className="h-8"
-                  onClick={() => setSelectedIds(new Set())}
+                  onClick={() => setSelectedIdsRaw(new Set())}
                 >
                   Clear selection
                 </Button>
@@ -334,9 +335,9 @@ export default function TasksPage() {
                             indeterminate={someVisibleSelected && !allVisibleSelected}
                             onCheckedChange={(checked) => {
                               if (checked) {
-                                setSelectedIds(new Set(visibleIds))
+                                setSelectedIdsRaw(new Set(visibleIds))
                               } else {
-                                setSelectedIds(new Set())
+                                setSelectedIdsRaw(new Set())
                               }
                             }}
                             aria-label="Select all tasks in this list"
@@ -361,7 +362,7 @@ export default function TasksPage() {
                             <Checkbox
                               checked={selectedIds.has(task.id)}
                               onCheckedChange={(checked) => {
-                                setSelectedIds((prev) => {
+                                setSelectedIdsRaw((prev) => {
                                   const next = new Set(prev)
                                   if (checked) next.add(task.id)
                                   else next.delete(task.id)
@@ -435,7 +436,7 @@ export default function TasksPage() {
       <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
       <TaskDetailDialog
         task={detailTask}
-        open={detailTaskId !== null}
+        open={detailTask !== null}
         onOpenChange={(open) => {
           if (!open) setDetailTaskId(null)
         }}
