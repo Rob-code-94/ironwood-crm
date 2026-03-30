@@ -24,6 +24,7 @@ import { useWorkspace } from "@/lib/workspace/context"
 import type { Priority, Task, TaskStatus } from "@/lib/types"
 import { toast } from "sonner"
 import { Plus, Trash } from "@phosphor-icons/react/dist/ssr"
+import { DueDateQuickChips } from "@/components/due-date-quick-chips"
 
 type TaskDetailDialogProps = {
   task: Task | null
@@ -302,6 +303,7 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
                   />
+                  <DueDateQuickChips value={dueDate} onChange={setDueDate} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-task-assignee">Assignee</Label>

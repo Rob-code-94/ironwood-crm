@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react"
 import type {
+  CalendarEvent,
   Company,
   Contact,
   Deal,
@@ -37,6 +38,7 @@ import {
   saveWorkspaceSnapshot,
   type WorkspaceSnapshotV1,
 } from "@/lib/workspace/persist"
+import { isoDateAddDays, toIsoDateLocal } from "@/lib/due-date-utils"
 
 export const ALL_PROJECTS_FILTER = "all"
 
@@ -68,15 +70,22 @@ type WorkspaceContextValue = {
   contacts: Contact[]
   companies: Company[]
   deals: Deal[]
+  calendarEvents: CalendarEvent[]
   documents: Document[]
   savedChatTurns: SavedChatTurn[]
   selectedProjectFilterId: string
   setSelectedProjectFilterId: (id: string) => void
+  taskDefaultDueOffsetDays: number | null
+  setTaskDefaultDueOffsetDays: (days: number | null) => void
   addProject: (input: NewProjectInput) => Project
   updateProject: (id: string, partial: Partial<Project>) => void
   deleteProject: (id: string) => void
   addTask: (input: NewTaskInput) => Task
   updateTask: (id: string, partial: Partial<Task>) => void
+  /** Set the same due date on many tasks (undefined clears). */
+  bulkSetTaskDueDates: (taskIds: string[], dueDate: string | undefined) => void
+  /** Shift each task’s due date by `days` (uses today if a task has no due date). */
+  bulkBumpTaskDueDates: (taskIds: string[], days: number) => void
   moveTaskToStatus: (taskId: string, status: TaskStatus) => void
   deleteTask: (id: string) => void
   addContact: (input: Omit<Contact, "id" | "tags" | "createdAt"> & { tags?: string[] }) => void
@@ -89,8 +98,18 @@ type WorkspaceContextValue = {
     stage: DealStage
     contactId?: string
     contactName?: string
+    closeDate?: string
+    followUpAt?: string
   }) => void
+  updateDeal: (id: string, partial: Partial<Deal>) => void
   advanceDealStage: (dealId: string) => void
+  addCalendarEvent: (input: {
+    title: string
+    date: string
+    time?: string
+    description?: string
+  }) => CalendarEvent
+  deleteCalendarEvent: (id: string) => void
   appendSavedChatTurn: (turn: Omit<SavedChatTurn, "id" | "createdAt">) => void
   clearSavedChatTurns: () => void
   projectNameById: (id: string | undefined) => string | undefined
@@ -146,6 +165,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (s && Array.isArray(s.documents)) return s.documents
     return []
   })
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
+    const s = loadWorkspaceSnapshot()
+    if (s && Array.isArray(s.calendarEvents)) return s.calendarEvents
+    return []
+  })
+  const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<number | null>(
+    () => {
+      const s = loadWorkspaceSnapshot()
+      if (
+        s &&
+        typeof s.taskDefaultDueOffsetDays === "number" &&
+        Number.isFinite(s.taskDefaultDueOffsetDays) &&
+        s.taskDefaultDueOffsetDays >= 0 &&
+        s.taskDefaultDueOffsetDays <= 365
+      ) {
+        return s.taskDefaultDueOffsetDays
+      }
+      return null
+    }
+  )
   const [selectedProjectFilterId, setSelectedProjectFilterId] = useState<string>(
     () => loadWorkspaceSnapshot()?.selectedProjectFilterId ?? ALL_PROJECTS_FILTER
   )
@@ -178,6 +217,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         Array.isArray(remote.savedChatTurns) ? remote.savedChatTurns : []
       )
       setDocuments(Array.isArray(remote.documents) ? remote.documents : [])
+      setCalendarEvents(Array.isArray(remote.calendarEvents) ? remote.calendarEvents : [])
+      setTaskDefaultDueOffsetDays(
+        typeof remote.taskDefaultDueOffsetDays === "number" &&
+          remote.taskDefaultDueOffsetDays >= 0 &&
+          remote.taskDefaultDueOffsetDays <= 365
+          ? remote.taskDefaultDueOffsetDays
+          : null
+      )
       setSelectedProjectFilterId(remote.selectedProjectFilterId)
       saveWorkspaceSnapshot(remote)
     })()
@@ -197,6 +244,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectedProjectFilterId,
       savedChatTurns,
       documents,
+      calendarEvents,
+      taskDefaultDueOffsetDays,
       persistedAt: Date.now(),
     }
     const t = window.setTimeout(() => {
@@ -219,6 +268,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     selectedProjectFilterId,
     savedChatTurns,
     documents,
+    calendarEvents,
+    taskDefaultDueOffsetDays,
   ])
 
   const projectNameById = useCallback(
@@ -313,6 +364,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     )
   }, [projects])
 
+  const bulkSetTaskDueDates = useCallback(
+    (taskIds: string[], dueDate: string | undefined) => {
+      const idSet = new Set(taskIds)
+      setTasks((prev) =>
+        prev.map((t) => (idSet.has(t.id) ? { ...t, dueDate } : t))
+      )
+    },
+    []
+  )
+
+  const bulkBumpTaskDueDates = useCallback((taskIds: string[], days: number) => {
+    const idSet = new Set(taskIds)
+    const today = toIsoDateLocal(new Date())
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (!idSet.has(t.id)) return t
+        const base = t.dueDate ?? today
+        return { ...t, dueDate: isoDateAddDays(base, days) }
+      })
+    )
+  }, [])
+
   const moveTaskToStatus = useCallback((taskId: string, status: TaskStatus) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
   }, [])
@@ -365,6 +438,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       stage: DealStage
       contactId?: string
       contactName?: string
+      closeDate?: string
+      followUpAt?: string
     }) => {
       if (!input.title.trim()) return
       const contactName =
@@ -380,11 +455,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           contactId: input.contactId,
           contactName,
           createdAt: isoNow(),
+          closeDate: input.closeDate?.trim() || undefined,
+          followUpAt: input.followUpAt?.trim() || undefined,
         },
       ])
     },
     [contacts]
   )
+
+  const updateDeal = useCallback((id: string, partial: Partial<Deal>) => {
+    setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...partial } : d)))
+  }, [])
+
+  const addCalendarEvent = useCallback(
+    (input: { title: string; date: string; time?: string; description?: string }) => {
+      const next: CalendarEvent = {
+        id: crypto.randomUUID(),
+        title: input.title.trim(),
+        date: input.date,
+        type: "meeting",
+        time: input.time?.trim() || undefined,
+        description: input.description?.trim() || undefined,
+      }
+      setCalendarEvents((prev) => [...prev, next])
+      return next
+    },
+    []
+  )
+
+  const deleteCalendarEvent = useCallback((id: string) => {
+    setCalendarEvents((prev) => prev.filter((e) => e.id !== id))
+  }, [])
 
   const advanceDealStage = useCallback((dealId: string) => {
     const order: DealStage[] = [
@@ -438,15 +539,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       contacts,
       companies,
       deals,
+      calendarEvents,
       documents,
       savedChatTurns,
       selectedProjectFilterId,
       setSelectedProjectFilterId,
+      taskDefaultDueOffsetDays,
+      setTaskDefaultDueOffsetDays,
       addProject,
       updateProject,
       deleteProject,
       addTask,
       updateTask,
+      bulkSetTaskDueDates,
+      bulkBumpTaskDueDates,
       moveTaskToStatus,
       deleteTask,
       addContact,
@@ -454,7 +560,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       addCompany,
       updateCompany,
       addDeal,
+      updateDeal,
       advanceDealStage,
+      addCalendarEvent,
+      deleteCalendarEvent,
       appendSavedChatTurn,
       clearSavedChatTurns,
       projectNameById,
@@ -467,14 +576,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       contacts,
       companies,
       deals,
+      calendarEvents,
       documents,
       savedChatTurns,
       selectedProjectFilterId,
+      taskDefaultDueOffsetDays,
       addProject,
       updateProject,
       deleteProject,
       addTask,
       updateTask,
+      bulkSetTaskDueDates,
+      bulkBumpTaskDueDates,
       moveTaskToStatus,
       deleteTask,
       addContact,
@@ -482,7 +595,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       addCompany,
       updateCompany,
       addDeal,
+      updateDeal,
       advanceDealStage,
+      addCalendarEvent,
+      deleteCalendarEvent,
       appendSavedChatTurn,
       clearSavedChatTurns,
       projectNameById,

@@ -20,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, CurrencyDollar, ArrowRight } from "@phosphor-icons/react"
-import type { DealStage } from "@/lib/types"
+import { Plus, CurrencyDollar, ArrowRight, PencilSimple } from "@phosphor-icons/react"
+import type { Deal, DealStage } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace/context"
 
 const STAGES: { key: DealStage; label: string }[] = [
@@ -38,13 +38,18 @@ function formatCurrency(value: number) {
 }
 
 export default function DealsPage() {
-  const { deals, contacts, addDeal, advanceDealStage } = useWorkspace()
+  const { deals, contacts, addDeal, advanceDealStage, updateDeal } = useWorkspace()
   const [open, setOpen] = useState(false)
+  const [editDeal, setEditDeal] = useState<Deal | null>(null)
+  const [editFollowUp, setEditFollowUp] = useState("")
+  const [editClose, setEditClose] = useState("")
   const [newDeal, setNewDeal] = useState({
     title: "",
     value: "",
     stage: "lead" as DealStage,
     contactId: "",
+    followUpAt: "",
+    closeDate: "",
   })
 
   function handleAddDeal() {
@@ -56,9 +61,33 @@ export default function DealsPage() {
       stage: newDeal.stage,
       contactId: newDeal.contactId || undefined,
       contactName: c?.name,
+      followUpAt: newDeal.followUpAt.trim() || undefined,
+      closeDate: newDeal.closeDate.trim() || undefined,
     })
-    setNewDeal({ title: "", value: "", stage: "lead", contactId: "" })
+    setNewDeal({
+      title: "",
+      value: "",
+      stage: "lead",
+      contactId: "",
+      followUpAt: "",
+      closeDate: "",
+    })
     setOpen(false)
+  }
+
+  function openEditDates(d: Deal) {
+    setEditDeal(d)
+    setEditFollowUp(d.followUpAt ?? "")
+    setEditClose(d.closeDate ?? "")
+  }
+
+  function saveEditDates() {
+    if (!editDeal) return
+    updateDeal(editDeal.id, {
+      followUpAt: editFollowUp.trim() || undefined,
+      closeDate: editClose.trim() || undefined,
+    })
+    setEditDeal(null)
   }
 
   const totalPipeline = deals
@@ -122,8 +151,64 @@ export default function DealsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Follow-up</Label>
+                  <Input
+                    type="date"
+                    value={newDeal.followUpAt}
+                    onChange={(e) =>
+                      setNewDeal((p) => ({ ...p, followUpAt: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Expected close</Label>
+                  <Input
+                    type="date"
+                    value={newDeal.closeDate}
+                    onChange={(e) =>
+                      setNewDeal((p) => ({ ...p, closeDate: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
               <Button className="w-full" onClick={handleAddDeal}>Create Deal</Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={editDeal !== null} onOpenChange={(v) => !v && setEditDeal(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Deal dates</DialogTitle>
+            </DialogHeader>
+            {editDeal && (
+              <div className="mt-2 space-y-4">
+                <p className="text-sm text-muted-foreground">{editDeal.title}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Follow-up</Label>
+                    <Input
+                      type="date"
+                      value={editFollowUp}
+                      onChange={(e) => setEditFollowUp(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Expected close</Label>
+                    <Input
+                      type="date"
+                      value={editClose}
+                      onChange={(e) => setEditClose(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <Button className="w-full" onClick={saveEditDates}>
+                  Save dates
+                </Button>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>
@@ -143,27 +228,47 @@ export default function DealsPage() {
               )}
               <div className="space-y-2 min-h-[100px]">
                 {stageDeals.map((deal) => (
-                  <Card key={deal.id} className="cursor-pointer hover:shadow-sm transition-shadow">
-                    <CardContent className="p-3 space-y-2">
+                  <Card key={deal.id} className="transition-shadow hover:shadow-sm">
+                    <CardContent className="space-y-2 p-3">
                       <p className="text-xs font-medium leading-tight">{deal.title}</p>
                       {deal.contactName && (
                         <p className="text-xs text-muted-foreground">{deal.contactName}</p>
                       )}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-green-600 flex items-center gap-0.5">
-                          <CurrencyDollar size={11} />{formatCurrency(deal.value).replace("$", "")}
+                      {(deal.followUpAt || deal.closeDate) && (
+                        <div className="space-y-0.5 text-[10px] leading-tight text-muted-foreground">
+                          {deal.followUpAt && <p>Follow-up {deal.followUpAt}</p>}
+                          {deal.closeDate && <p>Close {deal.closeDate}</p>}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="flex items-center gap-0.5 text-xs font-semibold text-green-600">
+                          <CurrencyDollar size={11} />
+                          {formatCurrency(deal.value).replace("$", "")}
                         </span>
-                        {!["won", "lost"].includes(deal.stage) && (
+                        <div className="flex items-center gap-0.5">
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-5 w-5 p-0"
-                            onClick={() => advanceDealStage(deal.id)}
-                            title="Advance stage"
+                            className="h-6 w-6 p-0"
+                            type="button"
+                            title="Edit follow-up and close dates"
+                            onClick={() => openEditDates(deal)}
                           >
-                            <ArrowRight size={12} />
+                            <PencilSimple size={12} />
                           </Button>
-                        )}
+                          {!["won", "lost"].includes(deal.stage) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              type="button"
+                              onClick={() => advanceDealStage(deal.id)}
+                              title="Advance stage"
+                            >
+                              <ArrowRight size={12} />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

@@ -52,11 +52,11 @@ export default function ToolsCalculatorPage() {
               type="button"
               variant={rateId === r.id ? "default" : "outline"}
               size="sm"
-              className="h-auto py-2 px-3 flex-col items-start text-left"
+              className="h-auto min-h-0 sm:h-auto shrink-0 whitespace-normal flex-col items-start justify-center gap-1 py-2.5 px-3 text-left leading-snug"
               onClick={() => setRateId(r.id)}
             >
-              <span className="font-medium">{r.label}</span>
-              <span className="text-xs opacity-80 font-normal">
+              <span className="font-medium [text-wrap:balance]">{r.label}</span>
+              <span className="text-xs opacity-80 font-normal leading-tight">
                 ${r.unitRate}
                 {r.unitLabel}
               </span>

@@ -1,4 +1,5 @@
 import type {
+  CalendarEvent,
   Company,
   Contact,
   Deal,
@@ -20,6 +21,13 @@ export type WorkspaceSnapshotV1 = {
   selectedProjectFilterId: string
   savedChatTurns: SavedChatTurn[]
   documents?: Document[]
+  /** User-created calendar rows (task due dates still come from `tasks`). */
+  calendarEvents?: CalendarEvent[]
+  /**
+   * When set (0–365), new task dialog pre-fills due date as today + N days.
+   * `null` / omitted = no default.
+   */
+  taskDefaultDueOffsetDays?: number | null
   /** Unix ms - used to pick newer data when syncing to a shared file across worktrees */
   persistedAt?: number
 }
@@ -40,6 +48,14 @@ export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 |
   if (typeof d.selectedProjectFilterId !== "string") return null
   const savedChatTurns = Array.isArray(d.savedChatTurns) ? d.savedChatTurns : []
   const documents = Array.isArray(d.documents) ? d.documents : []
+  const calendarEvents = Array.isArray(d.calendarEvents) ? (d.calendarEvents as CalendarEvent[]) : []
+  let taskDefaultDueOffsetDays: number | null = null
+  if (typeof d.taskDefaultDueOffsetDays === "number" && Number.isFinite(d.taskDefaultDueOffsetDays)) {
+    const n = Math.floor(d.taskDefaultDueOffsetDays)
+    if (n >= 0 && n <= 365) taskDefaultDueOffsetDays = n
+  } else if (d.taskDefaultDueOffsetDays === null) {
+    taskDefaultDueOffsetDays = null
+  }
   const persistedAt =
     typeof d.persistedAt === "number" && Number.isFinite(d.persistedAt)
       ? d.persistedAt
@@ -54,6 +70,8 @@ export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 |
     selectedProjectFilterId: d.selectedProjectFilterId,
     savedChatTurns: savedChatTurns as SavedChatTurn[],
     documents: documents as Document[],
+    calendarEvents,
+    taskDefaultDueOffsetDays,
     persistedAt,
   }
 }
