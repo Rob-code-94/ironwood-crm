@@ -216,7 +216,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSavedChatTurns(
         Array.isArray(remote.savedChatTurns) ? remote.savedChatTurns : []
       )
-      setDocuments(Array.isArray(remote.documents) ? remote.documents : [])
+      // Merge so remote snapshot does not wipe documents added locally before the fetch completed.
+      setDocuments((prev) => {
+        const remoteDocs = Array.isArray(remote.documents) ? remote.documents : []
+        const remoteIds = new Set(remoteDocs.map((d) => d.id))
+        const merged = [...remoteDocs]
+        for (const d of prev) {
+          if (!remoteIds.has(d.id)) merged.push(d)
+        }
+        return merged
+      })
       setCalendarEvents(Array.isArray(remote.calendarEvents) ? remote.calendarEvents : [])
       setTaskDefaultDueOffsetDays(
         typeof remote.taskDefaultDueOffsetDays === "number" &&
@@ -226,7 +235,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           : null
       )
       setSelectedProjectFilterId(remote.selectedProjectFilterId)
-      saveWorkspaceSnapshot(remote)
+      // Persist merged state via the debounced effect below (do not save `remote` alone).
     })()
     return () => {
       cancelled = true

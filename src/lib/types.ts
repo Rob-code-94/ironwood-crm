@@ -71,6 +71,8 @@ export interface Document {
   projectId?: string
   projectName?: string
   uploadedAt: string
+  /** Optional small data URL preview for images (local only; capped size at upload). */
+  previewDataUrl?: string
 }
 
 export interface Contact {

@@ -23,9 +23,10 @@ import {
   Trash,
 } from "@phosphor-icons/react"
 import { LoaderIcon } from "lucide-react"
-import type { Document, DocumentType } from "@/lib/types"
+import type { DocumentType } from "@/lib/types"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 import { getStoredCrmAiModel } from "@/lib/crm-ai-settings"
+import { documentTypeFromFileName, maybeImagePreviewDataUrl } from "@/lib/document-upload"
 
 const FileIcon = ({ type }: { type: DocumentType }) => {
   const props = { size: 32 }
@@ -77,15 +78,9 @@ export default function DocumentsPage() {
   async function handleFiles(files: FileList | null) {
     if (!files) return
     const fileArray = Array.from(files)
-    fileArray.forEach((file) => {
-      const ext = file.name.split(".").pop()?.toLowerCase()
-      const type: DocumentType =
-        ext === "pdf" ? "pdf"
-        : ["jpg", "jpeg", "png", "gif", "webp"].includes(ext ?? "") ? "image"
-        : ["xls", "xlsx", "csv"].includes(ext ?? "") ? "spreadsheet"
-        : ["doc", "docx"].includes(ext ?? "") ? "document"
-        : "other"
-
+    for (const file of fileArray) {
+      const type = documentTypeFromFileName(file.name)
+      const previewDataUrl = await maybeImagePreviewDataUrl(file, type)
       const pid =
         effectiveProjectFilter !== "all" ? effectiveProjectFilter : undefined
       addDocument({
@@ -94,6 +89,7 @@ export default function DocumentsPage() {
         size: file.size,
         type,
         uploadedAt: new Date().toISOString().split("T")[0],
+        ...(previewDataUrl ? { previewDataUrl } : {}),
         ...(pid
           ? {
               projectId: pid,
@@ -101,7 +97,7 @@ export default function DocumentsPage() {
             }
           : {}),
       })
-    })
+    }
 
     // Auto-analyze the first file with Gemini
     const firstFile = fileArray[0]
@@ -189,7 +185,8 @@ export default function DocumentsPage() {
           type="file"
           multiple
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.avif"
+          onChange={(e) => void handleFiles(e.target.files)}
         />
       </div>
 
@@ -209,6 +206,10 @@ export default function DocumentsPage() {
         <UploadSimple size={32} className="mx-auto mb-3 text-muted-foreground" />
         <p className="text-sm font-medium">Drag & drop files here</p>
         <p className="text-xs text-muted-foreground mt-1">or click Upload above</p>
+        <p className="text-xs text-muted-foreground mt-3 max-w-md mx-auto">
+          Files are kept as name, size, and an optional local thumbnail—full PDFs/images are not uploaded to
+          a server. Keep originals on your device.
+        </p>
       </div>
 
       {/* AI Analysis Panel */}
@@ -285,7 +286,15 @@ export default function DocumentsPage() {
           filtered.map((doc) => (
             <Card key={doc.id}>
               <CardContent className="flex items-center gap-4 py-3">
-                <FileIcon type={doc.type} />
+                {doc.previewDataUrl ? (
+                  <img
+                    src={doc.previewDataUrl}
+                    alt=""
+                    className="size-16 shrink-0 rounded-md border object-cover"
+                  />
+                ) : (
+                  <FileIcon type={doc.type} />
+                )}
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{doc.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -294,9 +303,6 @@ export default function DocumentsPage() {
                       <> · <Badge variant="outline" className="text-xs ml-1">{doc.projectName}</Badge></>
                     )}
                   </p>
-                  {doc.url === null && (
-                    <p className="text-xs text-amber-600 mt-0.5">File not available — re-upload</p>
-                  )}
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => deleteDocument(doc.id)}>
                   <Trash size={16} className="text-muted-foreground" />

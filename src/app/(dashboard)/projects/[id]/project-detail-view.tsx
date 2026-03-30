@@ -30,22 +30,14 @@ import { ResourceLinks } from "@/components/resource-links"
 import { parseKeyValueLines, recordToKeyValueLines } from "@/lib/kv-lines"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { DocumentType, ProjectLifecycleStatus, ProjectPasswordEntry } from "@/lib/types"
+import type { ProjectLifecycleStatus, ProjectPasswordEntry } from "@/lib/types"
+import { documentTypeFromFileName, maybeImagePreviewDataUrl } from "@/lib/document-upload"
 
 const statusColor: Record<ProjectLifecycleStatus, "default" | "secondary" | "outline"> = {
   active: "default",
   planning: "secondary",
   completed: "outline",
   archived: "outline",
-}
-
-function documentTypeFromName(fileName: string): DocumentType {
-  const ext = fileName.split(".").pop()?.toLowerCase()
-  if (ext === "pdf") return "pdf"
-  if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext ?? "")) return "image"
-  if (["xls", "xlsx", "csv"].includes(ext ?? "")) return "spreadsheet"
-  if (["doc", "docx"].includes(ext ?? "")) return "document"
-  return "other"
 }
 
 function formatDocSize(bytes: number) {
@@ -362,16 +354,19 @@ export function ProjectDetailView() {
                 type="file"
                 className="sr-only"
                 multiple
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp"
-                onChange={(e) => {
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.avif"
+                onChange={async (e) => {
                   const list = e.target.files
                   if (!list?.length || !project) return
                   for (const file of Array.from(list)) {
+                    const type = documentTypeFromFileName(file.name)
+                    const previewDataUrl = await maybeImagePreviewDataUrl(file, type)
                     addDocument({
                       name: file.name,
                       url: null,
                       size: file.size,
-                      type: documentTypeFromName(file.name),
+                      type,
+                      ...(previewDataUrl ? { previewDataUrl } : {}),
                       projectId: id,
                       projectName: project.name,
                       uploadedAt: new Date().toISOString().split("T")[0],
@@ -395,6 +390,13 @@ export function ProjectDetailView() {
                       key={doc.id}
                       className="flex items-center justify-between gap-2 px-3 py-2.5 hover:bg-muted/40"
                     >
+                      {doc.previewDataUrl ? (
+                        <img
+                          src={doc.previewDataUrl}
+                          alt=""
+                          className="size-10 shrink-0 rounded border object-cover"
+                        />
+                      ) : null}
                       <div className="min-w-0 flex-1">
                         <p className="font-medium truncate">{doc.name}</p>
                         <p className="text-xs text-muted-foreground">
