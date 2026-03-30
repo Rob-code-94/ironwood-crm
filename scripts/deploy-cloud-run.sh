@@ -3,8 +3,8 @@
 # Deploy Ironwood Planner to Google Cloud Run from the repo root.
 #
 # Prerequisites: gcloud CLI, Node 20+, this repo on main with a clean or acknowledged tree.
-# Config: copy .env.cloudrun.local.example → .env.cloudrun.local and set GCP_PROJECT
-#   (or run: gcloud config set project YOUR_PROJECT_ID).
+# Target project defaults to iwc-saas-crm (IWC SASS-CRM). Optional: .env.cloudrun.local overrides.
+# Align your CLI once: gcloud config set project iwc-saas-crm
 #
 set -euo pipefail
 
@@ -21,6 +21,8 @@ fi
 CLOUD_RUN_REGION="${CLOUD_RUN_REGION:-us-central1}"
 CLOUD_RUN_SERVICE="${CLOUD_RUN_SERVICE:-ironwood-planner}"
 CLOUD_RUN_URL="${CLOUD_RUN_URL:-https://ironwood-planner-316650805051.us-central1.run.app/}"
+# Pin production project unless .env.cloudrun.local sets GCP_PROJECT to something else.
+GCP_PROJECT="${GCP_PROJECT:-iwc-saas-crm}"
 
 prompt_yn() {
   local message="$1"
@@ -90,14 +92,9 @@ fi
 echo "→ npm run build"
 npm run build
 
-PROJECT="${GCP_PROJECT:-}"
-if [[ -z "$PROJECT" ]]; then
-  PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
-fi
-if [[ -z "$PROJECT" || "$PROJECT" == "(unset)" ]]; then
-  echo "error: set GCP_PROJECT in .env.cloudrun.local or run: gcloud config set project YOUR_PROJECT_ID" >&2
-  exit 1
-fi
+PROJECT="$GCP_PROJECT"
+echo "→ gcloud config set project $PROJECT"
+gcloud config set project "$PROJECT" --quiet
 
 echo "→ gcloud run deploy $CLOUD_RUN_SERVICE (region $CLOUD_RUN_REGION, project $PROJECT)"
 gcloud run deploy "$CLOUD_RUN_SERVICE" \
