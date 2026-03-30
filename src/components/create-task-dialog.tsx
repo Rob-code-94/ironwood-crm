@@ -23,12 +23,16 @@ import type { Priority, TaskStatus } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace/context"
 import { toast } from "sonner"
 import { Plus, Trash } from "@phosphor-icons/react/dist/ssr"
+import { DueDateQuickChips } from "@/components/due-date-quick-chips"
+import { isoDateAddDaysFromToday } from "@/lib/due-date-utils"
 
 type CreateTaskDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   defaultProjectId?: string
   defaultStatus?: TaskStatus
+  /** When set (YYYY-MM-DD), pre-fills due date; overrides default offset from Settings. */
+  defaultDueDate?: string
 }
 
 const priorities: Priority[] = ["low", "medium", "high", "urgent"]
@@ -41,8 +45,9 @@ export function CreateTaskDialog({
   onOpenChange,
   defaultProjectId,
   defaultStatus: defaultStatusProp,
+  defaultDueDate: defaultDueDateProp,
 }: CreateTaskDialogProps) {
-  const { projects, addTask } = useWorkspace()
+  const { projects, addTask, taskDefaultDueOffsetDays } = useWorkspace()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [projectId, setProjectId] = useState<string>("")
@@ -59,7 +64,19 @@ export function CreateTaskDialog({
     if (!open) return
     setProjectId(defaultProjectId ?? "")
     setStatus(defaultStatusProp ?? "todo")
-  }, [open, defaultProjectId, defaultStatusProp])
+    const pinned = defaultDueDateProp?.trim()
+    if (pinned) {
+      setDueDate(pinned)
+    } else if (
+      taskDefaultDueOffsetDays != null &&
+      Number.isFinite(taskDefaultDueOffsetDays) &&
+      taskDefaultDueOffsetDays >= 0
+    ) {
+      setDueDate(isoDateAddDaysFromToday(taskDefaultDueOffsetDays))
+    } else {
+      setDueDate("")
+    }
+  }, [open, defaultProjectId, defaultStatusProp, taskDefaultDueOffsetDays, defaultDueDateProp])
 
   function reset() {
     setTitle("")
@@ -287,7 +304,7 @@ export function CreateTaskDialog({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
+            <div className="space-y-2 col-span-2 sm:col-span-1">
               <Label htmlFor="task-due">Due date</Label>
               <Input
                 id="task-due"
@@ -295,8 +312,9 @@ export function CreateTaskDialog({
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
               />
+              <DueDateQuickChips value={dueDate} onChange={setDueDate} />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 col-span-2 sm:col-span-1">
               <Label htmlFor="task-assignee">Assignee</Label>
               <Input
                 id="task-assignee"

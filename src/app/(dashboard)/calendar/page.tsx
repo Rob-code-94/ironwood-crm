@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -16,8 +17,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { CalendarPlus } from "@phosphor-icons/react/dist/ssr"
+import { CalendarPlus, Trash } from "@phosphor-icons/react/dist/ssr"
 import { useWorkspace } from "@/lib/workspace/context"
+import { formatCalendarTimeLabel, toIsoDateLocal } from "@/lib/due-date-utils"
+import { toast } from "sonner"
 
 type CalEvent = {
   id: string
@@ -28,15 +31,44 @@ type CalEvent = {
   description?: string
 }
 
+function isTaskBackedEvent(id: string) {
+  return id.startsWith("task-")
+}
+
+function parseLocalDateParam(value: string | null): Date | undefined {
+  if (!value?.trim()) return undefined
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!m) return undefined
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  const d = Number(m[3])
+  const dt = new Date(y, mo - 1, d)
+  if (
+    dt.getFullYear() !== y ||
+    dt.getMonth() !== mo - 1 ||
+    dt.getDate() !== d
+  ) {
+    return undefined
+  }
+  return dt
+}
+
 export default function CalendarPage() {
-  const { tasks } = useWorkspace()
-  const [date, setDate] = useState<Date | undefined>(new Date())
-  const [events, setEvents] = useState<CalEvent[]>([])
+  const searchParams = useSearchParams()
+  const { tasks, calendarEvents, addCalendarEvent, deleteCalendarEvent } = useWorkspace()
+  const [date, setDate] = useState<Date | undefined>(() => new Date())
+  const [eventDialogOpen, setEventDialogOpen] = useState(false)
   const [newEvent, setNewEvent] = useState({
     title: "",
     time: "",
     description: "",
   })
+
+  const dateFromQuery = searchParams.get("date")
+  useEffect(() => {
+    const parsed = parseLocalDateParam(dateFromQuery)
+    if (parsed) setDate(parsed)
+  }, [dateFromQuery])
 
   const taskEvents = useMemo((): CalEvent[] => {
     return tasks
@@ -58,27 +90,38 @@ export default function CalendarPage() {
       }))
   }, [tasks])
 
-  const allEvents = useMemo(() => [...events, ...taskEvents], [events, taskEvents])
+  const storedCalEvents = useMemo((): CalEvent[] => {
+    return calendarEvents.map((e) => ({
+      id: e.id,
+      title: e.title,
+      date: new Date(`${e.date}T12:00:00`),
+      time: formatCalendarTimeLabel(e.time),
+      status: "event",
+      description: e.description,
+    }))
+  }, [calendarEvents])
+
+  const allEvents = useMemo(
+    () => [...storedCalEvents, ...taskEvents],
+    [storedCalEvents, taskEvents]
+  )
 
   const handleAddEvent = (e: React.FormEvent) => {
     e.preventDefault()
-    if (date && newEvent.title) {
-      const event: CalEvent = {
-        id: Date.now().toString(),
-        title: newEvent.title,
-        date,
-        time: newEvent.time || "10:00 AM",
-        status: "medium",
-        description: newEvent.description,
-      }
-      setEvents((prev) => [...prev, event])
-      setNewEvent({ title: "", time: "", description: "" })
-    }
+    if (!date || !newEvent.title.trim()) return
+    addCalendarEvent({
+      title: newEvent.title.trim(),
+      date: toIsoDateLocal(date),
+      time: newEvent.time.trim() || undefined,
+      description: newEvent.description.trim() || undefined,
+    })
+    toast.success("Event saved to workspace")
+    setNewEvent({ title: "", time: "", description: "" })
+    setEventDialogOpen(false)
   }
 
   const selectedDateEvents = allEvents.filter(
-    (event) =>
-      event.date.toDateString() === date?.toDateString()
+    (event) => event.date.toDateString() === date?.toDateString()
   )
 
   const statusColor: Record<string, string> = {
@@ -86,13 +129,16 @@ export default function CalendarPage() {
     high: "default",
     medium: "secondary",
     low: "outline",
+    event: "outline",
   }
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Calendar</h1>
-        <p className="text-muted-foreground mt-1">Your events and task due dates from the workspace</p>
+        <p className="text-muted-foreground mt-1">
+          Task due dates and workspace events (saved with your data).
+        </p>
       </div>
       <div className="grid gap-6 md:grid-cols-3">
         <Card className="md:col-span-1">
@@ -106,10 +152,10 @@ export default function CalendarPage() {
               onSelect={setDate}
               className="rounded-md border"
             />
-            <Dialog>
+            <Dialog open={eventDialogOpen} onOpenChange={setEventDialogOpen}>
               <DialogTrigger
                 render={
-                  <Button variant="default" className="w-full mt-4 gap-2" />
+                  <Button variant="default" className="mt-4 w-full gap-2" type="button" />
                 }
               >
                 <CalendarPlus size={16} />
@@ -119,8 +165,7 @@ export default function CalendarPage() {
                 <DialogHeader>
                   <DialogTitle>Create Event</DialogTitle>
                   <DialogDescription>
-                    Add a new event to your calendar for{" "}
-                    {date?.toLocaleDateString()}
+                    Add a new event for {date?.toLocaleDateString()}. It is stored in your workspace.
                   </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleAddEvent} className="space-y-4">
@@ -165,8 +210,12 @@ export default function CalendarPage() {
                     />
                   </div>
 
-                  <div className="flex gap-3 justify-end pt-4">
-                    <Button type="button" variant="outline">
+                  <div className="flex justify-end gap-3 pt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setEventDialogOpen(false)}
+                    >
                       Cancel
                     </Button>
                     <Button type="submit">Create Event</Button>
@@ -177,7 +226,7 @@ export default function CalendarPage() {
           </CardContent>
         </Card>
 
-        <div className="md:col-span-2 space-y-4">
+        <div className="space-y-4 md:col-span-2">
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">
@@ -190,11 +239,11 @@ export default function CalendarPage() {
                   {selectedDateEvents.map((event) => (
                     <div
                       key={event.id}
-                      className="p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                      className="rounded-lg border bg-card p-4 transition-colors hover:bg-muted/50"
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
                             <h3 className="font-medium">{event.title}</h3>
                             <Badge
                               variant={
@@ -208,21 +257,32 @@ export default function CalendarPage() {
                               {event.status}
                             </Badge>
                           </div>
-                          <p className="text-sm text-muted-foreground mb-2">
-                            {event.time}
-                          </p>
+                          <p className="mb-2 text-sm text-muted-foreground">{event.time}</p>
                           {event.description && (
-                            <p className="text-sm text-muted-foreground">
-                              {event.description}
-                            </p>
+                            <p className="text-sm text-muted-foreground">{event.description}</p>
                           )}
                         </div>
+                        {!isTaskBackedEvent(event.id) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
+                            aria-label="Delete event"
+                            onClick={() => {
+                              deleteCalendarEvent(event.id)
+                              toast.success("Event removed")
+                            }}
+                          >
+                            <Trash size={18} />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8">
+                <div className="py-8 text-center">
                   <p className="text-sm text-muted-foreground">
                     No events or task due dates on this day
                   </p>
@@ -237,7 +297,7 @@ export default function CalendarPage() {
             </CardHeader>
             <CardContent>
               {allEvents.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">
+                <p className="py-6 text-center text-sm text-muted-foreground">
                   Add calendar events above or create tasks with due dates — they will show here.
                 </p>
               ) : (
@@ -248,10 +308,10 @@ export default function CalendarPage() {
                     .map((event) => (
                       <div
                         key={event.id}
-                        className="flex items-start justify-between gap-4 p-3 rounded-lg border"
+                        className="flex items-start justify-between gap-4 rounded-lg border p-3"
                       >
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{event.title}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{event.title}</p>
                           <p className="text-xs text-muted-foreground">
                             {event.date.toLocaleDateString()} · {event.time}
                           </p>

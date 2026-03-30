@@ -3,8 +3,16 @@
  * (set via POST /api/ai/session-key for local/dev convenience).
  */
 export function getGoogleApiKeyFromRequest(req: Request): string | undefined {
-  const env = process.env.GOOGLE_API_KEY?.trim()
-  if (env) return env
+  // Accept common env names (tutorials often use GEMINI_API_KEY; Google docs vary).
+  const envCandidates = [
+    process.env.GOOGLE_API_KEY,
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    process.env.GEMINI_API_KEY,
+  ]
+  for (const candidate of envCandidates) {
+    const trimmed = candidate?.trim()
+    if (trimmed) return trimmed
+  }
   const cookie = req.headers.get("cookie") ?? ""
   const m = cookie.match(/(?:^|;\s*)iw_gemini_key=([^;]*)/)
   if (!m?.[1]) return undefined

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getGoogleApiKeyFromRequest } from "@/lib/ai-request"
-import { resolveGeminiModel, streamGeminiChat, type SimpleChatMessage } from "@/lib/gemini-client"
+import { resolveGeminiModel, streamGeminiChat, generateGeminiChatOnce, type SimpleChatMessage } from "@/lib/gemini-client"
 
 type ChatBody = {
   messages?: SimpleChatMessage[]
@@ -11,9 +11,18 @@ type ChatBody = {
   stream?: boolean
 }
 
-const DEFAULT_SYSTEM = `You are the in-app assistant for Ironwood Planner. You have context about the user's workspace: projects, tasks, CRM (contacts, companies, deals), documents, and tools.
+const DEFAULT_SYSTEM = `You are the in-app assistant for Ironwood Planner. You help users plan and execute work in plain language.
 
-Help them plan and execute work in plain language. 
+Note: you do not automatically receive the user's live workspace/CRM data. Instead, rely on:
+- the conversation messages you receive
+- any attached or extracted document text included in the conversation
+
+CRITICAL — files in the thread:
+- Earlier user messages may include blocks starting with "Attached file:" followed by extracted text (from PDF, HTML, Word, etc.). That text IS the file content for this conversation.
+- When the user says "this file", "the document", "review it", or "break it into tasks" without attaching again, use the most recent such "Attached file:" content in the thread. Do NOT claim you cannot see files if that text is present.
+- HTML uploads are converted to extracted text; you do not need the user to paste raw HTML.
+
+When you create tasks or projects, the app will execute those actions for the user after explicit confirmation. 
 
 IMPORTANT - Command Detection:
 When the user requests an action (e.g., "create a task", "add a project", "create a deal", "add a contact"), you MUST:
@@ -95,8 +104,21 @@ export async function POST(req: Request) {
             controller.enqueue(encoder.encode(chunk))
           }
         } catch (e) {
+          // Fallback: retry with non-streaming generation.
+          // This avoids environments where SSE streaming fetches can fail.
           const msg = e instanceof Error ? e.message : "Stream failed"
-          controller.enqueue(encoder.encode(`\n[Error] ${msg}`))
+          try {
+            const text = await generateGeminiChatOnce({
+              apiKey,
+              model,
+              systemInstruction,
+              messages,
+              signal: req.signal,
+            })
+            controller.enqueue(encoder.encode(text || `\n[Error] ${msg}`))
+          } catch {
+            controller.enqueue(encoder.encode(`\n[Error] ${msg}`))
+          }
         } finally {
           controller.close()
         }
@@ -114,16 +136,13 @@ export async function POST(req: Request) {
   }
 
   try {
-    let text = ""
-    for await (const chunk of streamGeminiChat({
+    const text = await generateGeminiChatOnce({
       apiKey,
       model,
       systemInstruction,
       messages,
       signal: req.signal,
-    })) {
-      text += chunk
-    }
+    })
     return NextResponse.json({
       text,
       conversationId: body.conversationId ?? null,

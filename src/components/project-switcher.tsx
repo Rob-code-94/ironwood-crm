@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import {
   Select,
   SelectContent,
@@ -18,6 +19,17 @@ export function ProjectSwitcher() {
       ? null
       : projects.find((p) => p.id === selectedProjectFilterId)
 
+  useEffect(() => {
+    if (selectedProjectFilterId === ALL_PROJECTS_FILTER) return
+    if (projects.some((p) => p.id === selectedProjectFilterId)) return
+    setSelectedProjectFilterId(ALL_PROJECTS_FILTER)
+  }, [projects, selectedProjectFilterId, setSelectedProjectFilterId])
+
+  const triggerLabel =
+    selectedProjectFilterId === ALL_PROJECTS_FILTER
+      ? "All projects"
+      : (current?.name ?? "All projects")
+
   return (
     <div className="border-b px-4 py-3 group-data-[collapsible=icon]:hidden">
       <Select
@@ -34,7 +46,7 @@ export function ProjectSwitcher() {
                 backgroundColor: current?.color ?? "var(--muted-foreground)",
               }}
             />
-            <SelectValue placeholder="All projects" />
+            <SelectValue placeholder="All projects">{triggerLabel}</SelectValue>
           </div>
         </SelectTrigger>
         <SelectContent>

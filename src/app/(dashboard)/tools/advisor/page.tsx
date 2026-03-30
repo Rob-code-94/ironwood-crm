@@ -12,6 +12,9 @@ import { toast } from "sonner"
 
 type ChatMessage = { role: "user" | "assistant"; content: string }
 
+const RESEARCH_INTENT_RE =
+  /\b(find|lookup|research|search)\b.*\b(phone|number|contact|company|website|email|address)\b|\b(phone|number|contact|company|website|email|address)\b.*\b(find|lookup|research|search)\b/i
+
 export default function ToolsAdvisorPage() {
   const {
     projects,
@@ -46,12 +49,14 @@ export default function ToolsAdvisorPage() {
     setLoading(true)
 
     try {
-      const res = await fetch("/api/chat", {
+      const shouldResearch = RESEARCH_INTENT_RE.test(text) && !/\b(tasks?|action items?|create|add|extract|to-?do|review|breakdown|list|organize|analyze)\b/i.test(text)
+      const res = await fetch(shouldResearch ? "/api/research-chat" : "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: messagesForApi,
           system: systemPrompt.trim() || undefined,
+          stream: false,
         }),
       })
       const data = await res.json()

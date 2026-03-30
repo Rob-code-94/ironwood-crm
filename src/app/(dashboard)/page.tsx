@@ -15,7 +15,8 @@ import {
   ArrowDown,
 } from "@phosphor-icons/react/dist/ssr"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
-import { TaskPriorityBadge, TaskStatusBadge } from "@/components/task-badges"
+import { TaskPriorityBadge } from "@/components/task-badges"
+import { TaskStatusSelect } from "@/components/task-status-select"
 import type { Task, TaskStatus } from "@/lib/types"
 
 const STATUS_LABELS: { key: TaskStatus; label: string }[] = [
@@ -30,7 +31,7 @@ function todayISO() {
 }
 
 export default function DashboardPage() {
-  const { tasks, projects, contacts, selectedProjectFilterId } = useWorkspace()
+  const { tasks, projects, contacts, selectedProjectFilterId, updateTask } = useWorkspace()
 
   const contextProject = useMemo(() => {
     if (selectedProjectFilterId === ALL_PROJECTS_FILTER) return undefined
@@ -228,7 +229,7 @@ export default function DashboardPage() {
                       <th className="px-4 py-3 text-left font-medium">Task</th>
                       <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Project</th>
                       <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Priority</th>
-                      <th className="px-4 py-3 text-left font-medium">Status</th>
+                      <th className="px-4 py-3 text-left font-medium min-w-[9rem]">Status</th>
                       <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
                     </tr>
                   </thead>
@@ -245,8 +246,12 @@ export default function DashboardPage() {
                         <td className="px-4 py-3 hidden lg:table-cell">
                           <TaskPriorityBadge priority={task.priority} />
                         </td>
-                        <td className="px-4 py-3">
-                          <TaskStatusBadge status={task.status} />
+                        <td className="px-4 py-3 align-middle">
+                          <TaskStatusSelect
+                            size="compact"
+                            value={task.status}
+                            onChange={(status) => updateTask(task.id, { status })}
+                          />
                         </td>
                         <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                           {task.dueDate ?? "—"}

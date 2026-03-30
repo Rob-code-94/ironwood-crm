@@ -1,8 +1,8 @@
 import { cookies } from "next/headers"
 import { Toaster } from "@/components/ui/sonner"
 import { WorkspaceProvider } from "@/lib/workspace/context"
-import { CrmAssistantProvider } from "@/components/crm-assistant-provider"
 import { DashboardInsetShell } from "@/components/dashboard-inset-shell"
+import { AppAssistantShell } from "@/components/iwc-assistant/app-assistant-shell"
 
 export default async function DashboardLayout({
   children,
@@ -15,11 +15,11 @@ export default async function DashboardLayout({
 
   return (
     <WorkspaceProvider>
-      <CrmAssistantProvider>
+      <AppAssistantShell>
         <DashboardInsetShell defaultSidebarOpen={defaultOpen}>
           {children}
         </DashboardInsetShell>
-      </CrmAssistantProvider>
+      </AppAssistantShell>
       <Toaster />
     </WorkspaceProvider>
   )

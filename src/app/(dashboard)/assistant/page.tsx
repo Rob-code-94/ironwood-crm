@@ -1,16 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { ModelSelector } from "@/components/ModelSelector"
 import { CrmAiSettingsCard } from "@/components/crm-ai-settings-card"
-import { useCrmAssistantUi } from "@/components/crm-assistant-provider"
 import {
   getStoredAgents,
   setActiveAgentId,
@@ -29,22 +27,20 @@ type SimpleChatMessage = { role: "user" | "assistant"; content: string }
 type StoredThread = { messages?: SimpleChatMessage[] }
 
 function ThreadSection() {
-  const { resetThread } = useCrmAssistantUi()
-  const [history, setHistory] = useState<SimpleChatMessage[]>([])
-
-  useEffect(() => {
+  const [history, setHistory] = useState<SimpleChatMessage[]>(() => {
+    if (typeof window === "undefined") return []
     try {
       const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as StoredThread
-        const messages = (parsed.messages ?? [])
-          .filter((msg): msg is SimpleChatMessage => msg && typeof msg.content === "string")
-          .slice(-10)
-          .reverse()
-        setHistory(messages)
-      }
-    } catch {}
-  }, [])
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as StoredThread
+      return (parsed.messages ?? [])
+        .filter((msg): msg is SimpleChatMessage => msg && typeof msg.content === "string")
+        .slice(-10)
+        .reverse()
+    } catch {
+      return []
+    }
+  })
 
   return (
     <Card>
@@ -58,7 +54,9 @@ function ThreadSection() {
         <Button
           variant="outline"
           onClick={() => {
-            resetThread()
+            try {
+              localStorage.removeItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+            } catch {}
             setHistory([])
             toast.success("Thread cleared")
           }}
@@ -76,7 +74,9 @@ function ThreadSection() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">No messages yet. Start chatting in the right panel.</p>
+          <p className="text-xs text-muted-foreground">
+            No messages yet. Conversation history appears here after you use the assistant from the app.
+          </p>
         )}
       </CardContent>
     </Card>
@@ -86,16 +86,11 @@ function ThreadSection() {
 const BLANK_FORM = { name: "", model: DEFAULT_CRM_MODEL as CrmAiModelId, systemPrompt: "" }
 
 function AgentsSection() {
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [agents, setAgents] = useState<Agent[]>(() => getStoredAgents())
+  const [activeId, setActiveId] = useState<string | null>(() => getActiveAgentId())
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(BLANK_FORM)
-
-  useEffect(() => {
-    setAgents(getStoredAgents())
-    setActiveId(getActiveAgentId())
-  }, [])
 
   function reload() {
     setAgents(getStoredAgents())
@@ -220,7 +215,7 @@ export default function AssistantPage() {
           <h1 className="text-3xl font-bold tracking-tight">Assistant</h1>
         </div>
         <p className="mt-2 text-muted-foreground">
-          Manage your AI assistant — configure agents, view chat history, and set up your API key. The chat panel is on the right.
+          Manage your AI assistant — configure agents, view recent thread activity, and set up your API key.
         </p>
       </div>
 

@@ -16,8 +16,12 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { RiArrowRightSLine } from "@remixicon/react"
+
+const navLinkClass =
+  "flex size-full min-w-0 items-center gap-2 overflow-hidden outline-none"
 
 export function NavMain({
   items,
@@ -33,49 +37,86 @@ export function NavMain({
     }[]
   }[]
 }) {
+  const { state } = useSidebar()
+  const isCollapsed = state === "collapsed"
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
           const ItemIcon = item.icon
-          return (
-          <Collapsible
-            key={item.title}
-            defaultOpen={item.isActive}
-            className="group/collapsible"
-            render={<SidebarMenuItem />}
-          >
-            <CollapsibleTrigger
-              render={
+          const hasSubItems = Array.isArray(item.items) && item.items.length > 0
+
+          if (!hasSubItems) {
+            // No sub-items: render as a direct link
+            return (
+              <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   tooltip={item.title}
-                  render={<Link href={item.url} />}
-                />
-              }
+                  render={<Link href={item.url} className={navLinkClass} />}
+                >
+                  {typeof ItemIcon === "function" ? (
+                    <ItemIcon className="size-4" />
+                  ) : (
+                    ItemIcon
+                  )}
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          }
+
+          // Icon / collapsed rail: submenus are hidden — navigate to the section root instead.
+          if (isCollapsed) {
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  render={<Link href={item.url} className={navLinkClass} />}
+                >
+                  {typeof ItemIcon === "function" ? (
+                    <ItemIcon className="size-4" />
+                  ) : (
+                    ItemIcon
+                  )}
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          }
+
+          // Expanded: collapsible with a real <button> trigger (no link)
+          return (
+            <Collapsible
+              key={item.title}
+              defaultOpen={item.isActive}
+              className="group/collapsible"
+              render={<SidebarMenuItem />}
             >
-              {typeof ItemIcon === "function" ? (
-                <ItemIcon className="size-4" />
-              ) : (
-                ItemIcon
-              )}
-              <span>{item.title}</span>
-              {item.items && item.items.length > 0 && (
+              <CollapsibleTrigger
+                render={<SidebarMenuButton tooltip={item.title} />}
+              >
+                {typeof ItemIcon === "function" ? (
+                  <ItemIcon className="size-4" />
+                ) : (
+                  ItemIcon
+                )}
+                <span>{item.title}</span>
                 <RiArrowRightSLine className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-              )}
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <SidebarMenuSub>
-                {item.items?.map((subItem) => (
-                  <SidebarMenuSubItem key={subItem.title}>
-                    <SidebarMenuSubButton render={<a href={subItem.url} />}>
-                      <span>{subItem.title}</span>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                ))}
-              </SidebarMenuSub>
-            </CollapsibleContent>
-          </Collapsible>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarMenuSub>
+                  {item.items?.map((subItem) => (
+                    <SidebarMenuSubItem key={subItem.title}>
+                      <SidebarMenuSubButton render={<Link href={subItem.url} />}>
+                        <span>{subItem.title}</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  ))}
+                </SidebarMenuSub>
+              </CollapsibleContent>
+            </Collapsible>
           )
         })}
       </SidebarMenu>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -23,10 +24,12 @@ import {
   AttachmentPrimitive,
   AuiIf,
   BranchPickerPrimitive,
+  ChainOfThoughtPrimitive,
   ComposerPrimitive,
   ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  type ReasoningMessagePartComponent,
   type TextMessagePartComponent,
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react"
@@ -34,11 +37,64 @@ import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown"
 import "@assistant-ui/react-markdown/styles/dot.css"
 
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import {
+  getStoredCrmAiModel,
+  setStoredCrmAiModel,
+  CRM_AI_MODELS,
+  isCrmAiModelId,
+  type CrmAiModelId,
+} from "@/lib/crm-ai-settings"
+import { useCrmAssistantUi } from "@/components/crm-assistant-provider"
+import { ComposerSlashAtInput } from "@/components/assistant-ui/composer-slash-at-input"
 
 const MarkdownText: TextMessagePartComponent = () => (
   <MarkdownTextPrimitive className="aui-md max-w-none text-foreground [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded-sm [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5" />
 )
+
+const ReasoningText: ReasoningMessagePartComponent = ({ text }) => (
+  <div className="my-1 rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap">
+    {text}
+  </div>
+)
+
+/**
+ * Rendered by MessagePrimitive.Parts via the `ChainOfThought` components slot.
+ * This component is mounted INSIDE ChainOfThoughtByIndicesProvider, which supplies
+ * the `chainOfThought` scope that AccordionTrigger and Parts require.
+ */
+function AssistantChainOfThought() {
+  return (
+    <div className="mb-2">
+      <ChainOfThoughtPrimitive.AccordionTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none">
+        <ChevronRightIcon className="size-3 transition-transform [[data-state=open]_&]:rotate-90" />
+        Show reasoning
+      </ChainOfThoughtPrimitive.AccordionTrigger>
+      <ChainOfThoughtPrimitive.Parts
+        components={{
+          Reasoning: ReasoningText,
+          tools: { Fallback: ToolFallback },
+        }}
+      />
+    </div>
+  )
+}
 
 const ToolFallback: ToolCallMessagePartComponent = ({
   toolName,
@@ -63,6 +119,126 @@ const ToolFallback: ToolCallMessagePartComponent = ({
     ) : null}
   </div>
 )
+
+function ModelSelect() {
+  const [model, setModel] = useState<CrmAiModelId>(() => getStoredCrmAiModel())
+
+  function handleChange(v: string | null) {
+    if (v && isCrmAiModelId(v)) {
+      setModel(v)
+      setStoredCrmAiModel(v)
+    }
+  }
+
+  /** Shorten model IDs for display: strip "gemini-" prefix */
+  function label(id: CrmAiModelId) {
+    return id.replace(/^gemini-/, "")
+  }
+
+  return (
+    <Select value={model} onValueChange={handleChange}>
+      <SelectTrigger
+        className="h-6 w-auto max-w-[170px] gap-1 border-0 bg-muted/50 px-2 text-xs hover:bg-muted focus:ring-0"
+        aria-label="Select model"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end" className="text-xs">
+        {CRM_AI_MODELS.map((m) => (
+          <SelectItem key={m} value={m} className="text-xs">
+            {label(m)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function ThreadHistoryMenu() {
+  const { saveAndNewThread, loadThread, deleteThread, savedThreads } =
+    useCrmAssistantUi()
+
+  function formatDate(iso: string) {
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    } catch {
+      return iso
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="Thread history"
+      >
+        <ChevronLeftIcon className="size-3 rotate-180" />
+        Threads
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+            Saved threads
+          </DropdownMenuLabel>
+          {savedThreads.length === 0 ? (
+            <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+              No saved threads yet
+            </DropdownMenuItem>
+          ) : (
+            savedThreads.map((t) => (
+              <div key={t.id} className="flex items-center gap-1 px-1">
+                <DropdownMenuItem
+                  className="min-w-0 flex-1 flex-col items-start gap-0 py-1.5 text-xs cursor-pointer"
+                  onClick={() => loadThread(t.id)}
+                >
+                  <span className="truncate w-full font-medium">{t.title}</span>
+                  <span className="text-muted-foreground">{formatDate(t.savedAt)}</span>
+                </DropdownMenuItem>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
+                  title="Delete thread"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteThread(t.id)
+                  }}
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              </div>
+            ))
+          )}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            className="text-xs cursor-pointer"
+            onClick={saveAndNewThread}
+          >
+            <PlusIcon className="mr-1.5 size-3" />
+            Save &amp; start new chat
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function ThreadHeader() {
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
+      <ThreadHistoryMenu />
+      <ModelSelect />
+    </div>
+  )
+}
 
 function ComposerAttachmentTile() {
   return (
@@ -128,7 +304,7 @@ function UserAttachmentTile() {
 
 function UserMessageAttachments() {
   return (
-    <div className="col-start-1 flex flex-wrap content-start gap-2">
+    <div className="flex w-full flex-wrap justify-end gap-2">
       <MessagePrimitive.Attachments
         components={{
           Image: UserAttachmentTile,
@@ -153,6 +329,8 @@ export function Thread() {
         } as React.CSSProperties
       }
     >
+      <ThreadHeader />
+
       <ThreadPrimitive.Viewport
         turnAnchor="top"
         className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scroll-smooth"
@@ -208,7 +386,9 @@ function ThreadWelcome() {
           How can I help you today?
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
-          Drag files into the composer below or use the + button to attach documents and images.
+          Drag files into the composer below or use the + button to attach documents and images
+          (including HTML). Extracted text stays in this thread—follow-up messages can refer to “the
+          file” without uploading again.
         </p>
       </div>
       <div className="grid w-full gap-2 md:grid-cols-2">
@@ -246,7 +426,7 @@ function Composer() {
     <ComposerPrimitive.Root className="flex w-full flex-col gap-0">
       <ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col gap-2 rounded-2xl border border-input bg-background p-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-dashed data-[dragging=true]:border-primary/50 data-[dragging=true]:bg-muted/40">
         <ComposerAttachments />
-        <ComposerPrimitive.Input
+        <ComposerSlashAtInput
           placeholder="Send a message…"
           className="min-h-12 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           rows={1}
@@ -308,21 +488,21 @@ function ComposerAction() {
 function UserMessage() {
   return (
     <MessagePrimitive.Root
-      className="mx-auto grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-1 py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
+      className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col items-end gap-2 px-1 py-3 fade-in slide-in-from-bottom-1 animate-in duration-150"
       data-role="user"
     >
       <UserMessageAttachments />
 
-      <div className="relative col-start-2 min-w-0">
+      <div className="relative max-w-[min(100%,42rem)] min-w-0">
+        <div className="absolute top-1/2 right-full hidden pr-2 sm:block -translate-y-1/2">
+          <UserActionBar />
+        </div>
         <div className="rounded-2xl bg-muted px-4 py-2.5 break-words text-foreground">
           <MessagePrimitive.Parts />
         </div>
-        <div className="absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2">
-          <UserActionBar />
-        </div>
       </div>
 
-      <BranchPicker className="col-span-full col-start-1 row-start-3 -mr-1 justify-end" />
+      <BranchPicker className="w-full justify-end pr-1" />
     </MessagePrimitive.Root>
   )
 }
@@ -347,7 +527,7 @@ function EditComposer() {
   return (
     <MessagePrimitive.Root className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col px-2 py-3">
       <ComposerPrimitive.Root className="ml-auto flex w-full max-w-[85%] flex-col rounded-2xl bg-muted">
-        <ComposerPrimitive.Input
+        <ComposerSlashAtInput
           className="min-h-14 w-full resize-none bg-transparent p-4 text-foreground text-sm outline-none"
           autoFocus
         />
@@ -379,7 +559,7 @@ function AssistantMessage() {
         <MessagePrimitive.Parts
           components={{
             Text: MarkdownText,
-            tools: { Fallback: ToolFallback },
+            ChainOfThought: AssistantChainOfThought,
           }}
         />
         <MessageError />

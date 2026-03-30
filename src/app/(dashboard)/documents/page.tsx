@@ -22,8 +22,10 @@ import {
   MagnifyingGlass,
   Trash,
 } from "@phosphor-icons/react"
+import { LoaderIcon } from "lucide-react"
 import type { Document, DocumentType } from "@/lib/types"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
+import { getStoredCrmAiModel } from "@/lib/crm-ai-settings"
 
 const FileIcon = ({ type }: { type: DocumentType }) => {
   const props = { size: 32 }
@@ -43,11 +45,16 @@ function formatSize(bytes: number) {
 }
 
 export default function DocumentsPage() {
-  const { projects, selectedProjectFilterId, documents, addDocument, deleteDocument } = useWorkspace()
+  const { projects, selectedProjectFilterId, documents, addDocument, deleteDocument, addTask } = useWorkspace()
   const [search, setSearch] = useState("")
   const [projectFilter, setProjectFilter] = useState("all")
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Document AI analysis state
+  const [analysisState, setAnalysisState] = useState<"idle" | "analyzing" | "done" | "error">("idle")
+  const [pendingAnalysis, setPendingAnalysis] = useState<{ extracted: string; fileName: string } | null>(null)
+  const [creatingTasks, setCreatingTasks] = useState(false)
 
   useEffect(() => {
     if (selectedProjectFilterId !== ALL_PROJECTS_FILTER) {
@@ -67,9 +74,10 @@ export default function DocumentsPage() {
     return matchSearch && matchProject
   })
 
-  function handleFiles(files: FileList | null) {
+  async function handleFiles(files: FileList | null) {
     if (!files) return
-    Array.from(files).forEach((file) => {
+    const fileArray = Array.from(files)
+    fileArray.forEach((file) => {
       const ext = file.name.split(".").pop()?.toLowerCase()
       const type: DocumentType =
         ext === "pdf" ? "pdf"
@@ -78,14 +86,83 @@ export default function DocumentsPage() {
         : ["doc", "docx"].includes(ext ?? "") ? "document"
         : "other"
 
+      const pid =
+        effectiveProjectFilter !== "all" ? effectiveProjectFilter : undefined
       addDocument({
         name: file.name,
         url: null,
         size: file.size,
         type,
         uploadedAt: new Date().toISOString().split("T")[0],
+        ...(pid
+          ? {
+              projectId: pid,
+              projectName: projects.find((p) => p.id === pid)?.name,
+            }
+          : {}),
       })
     })
+
+    // Auto-analyze the first file with Gemini
+    const firstFile = fileArray[0]
+    if (!firstFile) return
+    setAnalysisState("analyzing")
+    setPendingAnalysis(null)
+    try {
+      const fd = new FormData()
+      fd.set("file", firstFile)
+      fd.set("instructions", "List all concrete action items, tasks, phases, and deliverables with any dates or deadlines mentioned. Be specific and detailed.")
+      fd.set("model", getStoredCrmAiModel())
+      const res = await fetch("/api/process-file", { method: "POST", body: fd })
+      const data = (await res.json()) as { extracted?: string; error?: string }
+      if (res.ok && typeof data.extracted === "string") {
+        setPendingAnalysis({ extracted: data.extracted, fileName: firstFile.name })
+        setAnalysisState("done")
+      } else {
+        setAnalysisState("error")
+      }
+    } catch {
+      setAnalysisState("error")
+    }
+  }
+
+  async function createTasksFromAnalysis() {
+    if (!pendingAnalysis) return
+    setCreatingTasks(true)
+    try {
+      const res = await fetch("/api/execute-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: `Create tasks from this document analysis of "${pendingAnalysis.fileName}":\n\n${pendingAnalysis.extracted}`,
+          commandType: "create-tasks",
+          model: getStoredCrmAiModel(),
+        }),
+      })
+      const data = (await res.json()) as {
+        success?: boolean
+        tasks?: { title: string; description?: string; dueDate?: string }[]
+      }
+      if (data.success && Array.isArray(data.tasks)) {
+        const projectId =
+          effectiveProjectFilter !== "all" ? effectiveProjectFilter : undefined
+        for (const t of data.tasks) {
+          addTask({
+            title: t.title,
+            description: t.description,
+            priority: "medium",
+            dueDate: t.dueDate,
+            projectId,
+          })
+        }
+        setPendingAnalysis(null)
+        setAnalysisState("idle")
+      }
+    } catch {
+      // Keep state so user can retry
+    } finally {
+      setCreatingTasks(false)
+    }
   }
 
   return (
@@ -133,6 +210,42 @@ export default function DocumentsPage() {
         <p className="text-sm font-medium">Drag & drop files here</p>
         <p className="text-xs text-muted-foreground mt-1">or click Upload above</p>
       </div>
+
+      {/* AI Analysis Panel */}
+      {analysisState === "analyzing" && (
+        <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground flex items-center gap-2">
+          <LoaderIcon className="size-4 animate-spin shrink-0" />
+          Analyzing document with Gemini…
+        </div>
+      )}
+      {analysisState === "done" && pendingAnalysis && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <p className="font-medium text-sm">AI Analysis: {pendingAnalysis.fileName}</p>
+            <pre className="text-xs whitespace-pre-wrap text-muted-foreground max-h-48 overflow-auto rounded-md bg-muted/30 p-2">
+              {pendingAnalysis.extracted}
+            </pre>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={createTasksFromAnalysis} disabled={creatingTasks}>
+                {creatingTasks ? "Creating tasks…" : "Create tasks from this"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setPendingAnalysis(null); setAnalysisState("idle") }}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {analysisState === "error" && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive flex items-center justify-between">
+          <span>Document analysis failed. Check that your Gemini API key is set in Assistant settings.</span>
+          <Button size="sm" variant="ghost" onClick={() => setAnalysisState("idle")}>Dismiss</Button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-2">

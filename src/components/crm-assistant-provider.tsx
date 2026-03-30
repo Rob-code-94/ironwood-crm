@@ -21,6 +21,10 @@ import type { ExportedMessageRepository } from "@assistant-ui/core"
 import {
   CRM_ASSISTANT_THREAD_STORAGE_KEY,
   clearCrmAssistantThreadStorage,
+  getSavedThreads,
+  addSavedThread,
+  deleteSavedThread,
+  type SavedThread,
 } from "@/lib/crm-assistant-storage"
 import {
   FallbackDocumentAttachmentAdapter,
@@ -28,16 +32,36 @@ import {
   type CreatedCommandProject,
   type CreatedCommandTask,
 } from "@/lib/crm-assistant-chat"
-import { useWorkspace } from "@/lib/workspace/context"
+import { useWorkspace, ALL_PROJECTS_FILTER } from "@/lib/workspace/context"
 
 function isHexColor(s: string): boolean {
   return /^#[0-9A-Fa-f]{6}$/.test(s.trim())
+}
+
+/** Extract a display title from an exported thread's messages */
+function threadTitle(exported: ExportedMessageRepository): string {
+  const messages = ((exported as unknown) as { messages?: { role: string; content?: { type: string; text?: string }[] }[] }).messages ?? []
+  for (const m of messages) {
+    if (m.role === "user" && Array.isArray(m.content)) {
+      for (const c of m.content) {
+        if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
+          const snippet = c.text.trim().slice(0, 55)
+          return snippet.length < c.text.trim().length ? `${snippet}…` : snippet
+        }
+      }
+    }
+  }
+  return `Chat on ${new Date().toLocaleDateString()}`
 }
 
 type CrmAssistantUiValue = {
   commandMode: boolean
   setCommandMode: (v: boolean) => void
   resetThread: () => void
+  saveAndNewThread: () => void
+  loadThread: (id: string) => void
+  deleteThread: (id: string) => void
+  savedThreads: SavedThread[]
 }
 
 const CrmAssistantUiContext = createContext<CrmAssistantUiValue | null>(null)
@@ -55,40 +79,96 @@ function CrmAssistantRuntime({
 }: {
   children: ReactNode
 }) {
-  const { addTask, addProject } = useWorkspace()
-  const onTasksCreatedRef = useRef<((tasks: CreatedCommandTask[]) => void) | undefined>(
-    undefined
-  )
-  const onProjectsCreatedRef = useRef<
-    ((projects: CreatedCommandProject[]) => void) | undefined
+  const { addTask, addProject, selectedProjectFilterId, projects } = useWorkspace()
+  const onApplyPendingWorkspaceRef = useRef<
+    | ((batch: { tasks: CreatedCommandTask[]; projects: CreatedCommandProject[] }) => void)
+    | undefined
   >(undefined)
 
   useEffect(() => {
-    onTasksCreatedRef.current = (tasks) => {
-      for (const t of tasks) {
-        addTask({
-          title: t.title,
-          description: t.description,
-          priority: "medium",
-          dueDate: t.dueDate,
-        })
-      }
-    }
-  }, [addTask])
+    onApplyPendingWorkspaceRef.current = (batch) => {
+      const { tasks, projects: projectsToAdd } = batch
 
-  useEffect(() => {
-    onProjectsCreatedRef.current = (projects) => {
-      for (const p of projects) {
+      const validExistingIds = new Set(projects.map((p) => p.id))
+
+      let firstNewProjectId: string | undefined
+      for (const p of projectsToAdd) {
         const color = p.color && isHexColor(p.color) ? p.color.trim() : "#6366f1"
-        addProject({
+        const created = addProject({
           name: p.name,
           description: p.description,
           color,
           category: p.category,
         })
+        if (!firstNewProjectId) firstNewProjectId = created.id
+      }
+
+      const onlyNewProjectBundle =
+        projectsToAdd.length === 1 &&
+        tasks.length > 0 &&
+        tasks.every((t) => !t.projectId)
+
+      for (const t of tasks) {
+        let projectId =
+          t.projectId && validExistingIds.has(t.projectId) ? t.projectId : undefined
+
+        if (projectId === undefined && onlyNewProjectBundle && firstNewProjectId) {
+          projectId = firstNewProjectId
+        }
+
+        addTask({
+          title: t.title,
+          description: t.description,
+          priority: "medium",
+          dueDate: t.dueDate,
+          projectId,
+          section: t.section,
+          links: t.links?.length ? t.links : undefined,
+        })
       }
     }
-  }, [addProject])
+  }, [addTask, addProject, projects])
+
+  const projectsCatalog = useMemo(
+    () =>
+      projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.description?.trim() ? { description: p.description.trim() } : {}),
+      })),
+    [projects]
+  )
+
+  const workspaceContext = useMemo(() => {
+    const filterId = selectedProjectFilterId
+    const filterLine =
+      !filterId
+        ? "Current project filter: unknown."
+        : filterId === ALL_PROJECTS_FILTER
+          ? "Current project filter: all projects."
+          : (() => {
+              const projectName = projects.find((p) => p.id === filterId)?.name
+              return projectName
+                ? `Current project filter (sidebar): ${projectName}.`
+                : `Current project filter id: ${filterId}.`
+            })()
+
+    if (projects.length === 0) {
+      return `${filterLine}\n\nThere are no projects yet. New tasks will be general (unassigned to a project) unless you create a project first.`
+    }
+
+    const lines = projects.map(
+      (p) =>
+        `- **${p.name}** (id: \`${p.id}\`)${p.description?.trim() ? ` — ${p.description.trim().slice(0, 120)}${p.description.trim().length > 120 ? "…" : ""}` : ""}`
+    )
+
+    return `${filterLine}
+
+**Projects in this workspace** (the command parser matches tasks to these by id; if unsure it uses **General**):
+${lines.join("\n")}
+
+The user must confirm before any task or project is saved. Prefer **General** when placement is ambiguous.`
+  }, [projects, selectedProjectFilterId])
 
   const [commandMode, setCommandMode] = useState(false)
   const commandModeRef = useRef(commandMode)
@@ -98,8 +178,9 @@ function CrmAssistantRuntime({
 
   const adapter = useCrmChatModelAdapter(
     commandModeRef,
-    onTasksCreatedRef,
-    onProjectsCreatedRef
+    onApplyPendingWorkspaceRef,
+    workspaceContext,
+    projectsCatalog
   )
 
   const attachments = useMemo(
@@ -157,18 +238,72 @@ function CrmAssistantRuntime({
     }
   }, [runtime])
 
+  const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
+    getSavedThreads()
+  )
+
   const resetThread = useCallback(() => {
     clearCrmAssistantThreadStorage()
     runtime.thread.reset()
   }, [runtime])
+
+  const saveAndNewThread = useCallback(() => {
+    const exported = runtime.thread.export()
+    const messages = (exported as { messages?: unknown[] }).messages ?? []
+    if (messages.length > 0) {
+      const saved: SavedThread = {
+        id: crypto.randomUUID(),
+        title: threadTitle(exported),
+        savedAt: new Date().toISOString(),
+        data: exported,
+      }
+      addSavedThread(saved)
+      setSavedThreads(getSavedThreads())
+    }
+    clearCrmAssistantThreadStorage()
+    runtime.thread.reset()
+  }, [runtime])
+
+  const loadThread = useCallback(
+    (id: string) => {
+      const threads = getSavedThreads()
+      const found = threads.find((t) => t.id === id)
+      if (!found) return
+      clearCrmAssistantThreadStorage()
+      runtime.thread.reset()
+      // Small delay so reset propagates before we import
+      setTimeout(() => {
+        try {
+          runtime.thread.import(found.data as ExportedMessageRepository)
+          // Persist so the loaded thread auto-saves going forward
+          localStorage.setItem(
+            CRM_ASSISTANT_THREAD_STORAGE_KEY,
+            JSON.stringify(found.data)
+          )
+        } catch {
+          /* ignore */
+        }
+      }, 50)
+    },
+    [runtime]
+  )
+
+  const deleteThread = useCallback((id: string) => {
+    deleteSavedThread(id)
+    setSavedThreads(getSavedThreads())
+  }, [])
 
   const uiValue = useMemo<CrmAssistantUiValue>(
     () => ({
       commandMode,
       setCommandMode,
       resetThread,
+      saveAndNewThread,
+      loadThread,
+      deleteThread,
+      savedThreads,
     }),
-    [commandMode, resetThread]
+    [commandMode, resetThread, saveAndNewThread, loadThread, deleteThread, savedThreads]
   )
 
   return (

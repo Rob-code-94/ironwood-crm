@@ -25,6 +25,22 @@ export interface Project {
   dueDate?: string
   /** Arbitrary key-value labels for any vertical (e.g. IDs, codes) */
   customFields?: Record<string, string>
+  /**
+   * Saved logins for this project (local workspace only, not encrypted).
+   * Prefer a real password manager for highly sensitive accounts.
+   */
+  passwordEntries?: ProjectPasswordEntry[]
+  /** @deprecated Use `passwordEntries`; migrated automatically in the project UI */
+  passwordVault?: string
+}
+
+export interface ProjectPasswordEntry {
+  id: string
+  /** e.g. "CAQH ProView" */
+  label?: string
+  login?: string
+  password?: string
+  url?: string
 }
 
 export interface Task {
@@ -91,14 +107,22 @@ export interface Deal {
   contactName?: string
   projectId?: string
   createdAt: string
+  /** Expected close date (YYYY-MM-DD, local calendar). */
+  closeDate?: string
+  /** Follow-up / next touch date (YYYY-MM-DD, local calendar). */
+  followUpAt?: string
 }
 
 export interface CalendarEvent {
   id: string
   title: string
+  /** YYYY-MM-DD local calendar date */
   date: string
   type: "task" | "meeting" | "deadline"
   refId?: string
+  /** HTML time input value e.g. "14:30", or empty for all-day */
+  time?: string
+  description?: string
 }
 
 /** Persisted Q&A from advisor chat (generic, any project) */

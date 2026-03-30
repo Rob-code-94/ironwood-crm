@@ -69,10 +69,10 @@ export function CrmAiSettingsCard() {
           AI assistant (Gemini)
         </CardTitle>
         <CardDescription>
-          Chat and command mode need a Gemini API key (below) or{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">GOOGLE_API_KEY</code> in{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code>. Model and system
-          prompt are stored in this browser&apos;s{" "}
+          Prefer <code className="rounded bg-muted px-1 py-0.5 text-xs">GOOGLE_API_KEY</code> in{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">.env.local</code> (persists until you
+          rotate the key at Google). Alternatively paste a key below (stored in a long-lived
+          httpOnly cookie for this machine). Model and system prompt live in this browser&apos;s{" "}
           <code className="rounded bg-muted px-1 py-0.5 text-xs">localStorage</code>. Never commit
           keys to git — get a key from the{" "}
           <a
@@ -116,6 +116,7 @@ export function CrmAiSettingsCard() {
                 value={sessionKey}
                 onChange={(e) => setSessionKey(e.target.value)}
                 className="font-mono text-sm"
+                suppressHydrationWarning
               />
             </div>
             <div className="flex flex-wrap gap-2">

@@ -13,7 +13,7 @@ import Link from "next/link"
 
 const navItems = [
   { label: "Dashboard", href: "/" },
-  { label: "Assistant", href: "/chat" },
+  { label: "AI assistant", href: "/assistant" },
   { label: "Tasks", href: "/tasks" },
   { label: "Board", href: "/tasks/board" },
   { label: "Projects", href: "/projects" },

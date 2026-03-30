@@ -1,3 +1,4 @@
+import { PlannerSettingsCard } from "@/components/planner-settings-card"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -21,6 +22,8 @@ export default function SettingsPage() {
           </a>.
         </p>
       </div>
+
+      <PlannerSettingsCard />
 
       {/* Profile */}
       <Card>
