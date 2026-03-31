@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -309,20 +310,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
 
       const finishWithLocalFallback = () => {
-        if (cancelled) return
-        const local = loadWorkspaceSnapshot()
-        if (local)
-          applySnapshotToSetters(
-            local,
-            workspaceSetters,
-            lastServerPersistedAtRef,
-            lastServerSnapshotForGuardRef
-          )
-        else {
-          lastServerPersistedAtRef.current = null
-          lastServerSnapshotForGuardRef.current = null
-        }
-        setWorkspaceHydrated(true)
+        startTransition(() => {
+          if (cancelled) return
+          const local = loadWorkspaceSnapshot()
+          if (local)
+            applySnapshotToSetters(
+              local,
+              workspaceSetters,
+              lastServerPersistedAtRef,
+              lastServerSnapshotForGuardRef
+            )
+          else {
+            lastServerPersistedAtRef.current = null
+            lastServerSnapshotForGuardRef.current = null
+          }
+          setWorkspaceHydrated(true)
+        })
       }
 
       if (res.status === 503 || res.status === 404) {
@@ -367,13 +370,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
 
       if (remoteT < localPersistedAt && localSnap) {
-        applySnapshotToSetters(
-          localSnap,
-          workspaceSetters,
-          lastServerPersistedAtRef,
-          lastServerSnapshotForGuardRef
-        )
-        setWorkspaceHydrated(true)
+        startTransition(() => {
+          if (cancelled) return
+          applySnapshotToSetters(
+            localSnap,
+            workspaceSetters,
+            lastServerPersistedAtRef,
+            lastServerSnapshotForGuardRef
+          )
+          setWorkspaceHydrated(true)
+        })
         return
       }
 
@@ -384,13 +390,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             remoteT,
           })
         }
-        applySnapshotToSetters(
-          localSnap,
-          workspaceSetters,
-          lastServerPersistedAtRef,
-          lastServerSnapshotForGuardRef
-        )
-        setWorkspaceHydrated(true)
+        startTransition(() => {
+          if (cancelled) return
+          applySnapshotToSetters(
+            localSnap,
+            workspaceSetters,
+            lastServerPersistedAtRef,
+            lastServerSnapshotForGuardRef
+          )
+          setWorkspaceHydrated(true)
+        })
         return
       }
 
@@ -403,13 +412,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         })
       }
 
-      applySnapshotToSetters(
-        remote,
-        workspaceSetters,
-        lastServerPersistedAtRef,
-        lastServerSnapshotForGuardRef
-      )
-      setWorkspaceHydrated(true)
+      startTransition(() => {
+        if (cancelled) return
+        applySnapshotToSetters(
+          remote,
+          workspaceSetters,
+          lastServerPersistedAtRef,
+          lastServerSnapshotForGuardRef
+        )
+        setWorkspaceHydrated(true)
+      })
     })()
 
     return () => {
@@ -478,7 +490,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           try {
             const raw = await g.json()
             const latest = normalizeWorkspaceSnapshot(raw)
-            if (latest) applyRemoteSnapshot(latest)
+            if (latest) {
+              startTransition(() => {
+                applyRemoteSnapshot(latest)
+              })
+            }
           } catch {
             /* ignore */
           }
@@ -503,7 +519,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           try {
             const raw = await g.json()
             const latest = normalizeWorkspaceSnapshot(raw)
-            if (latest) applyRemoteSnapshot(latest)
+            if (latest) {
+              startTransition(() => {
+                applyRemoteSnapshot(latest)
+              })
+            }
           } catch {
             /* ignore */
           }

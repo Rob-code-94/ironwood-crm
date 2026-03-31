@@ -1,4 +1,5 @@
 import { PlannerSettingsCard } from "@/components/planner-settings-card"
+import { WorkspaceRepairCard } from "@/components/workspace-repair-card"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,6 +25,8 @@ export default function SettingsPage() {
       </div>
 
       <PlannerSettingsCard />
+
+      <WorkspaceRepairCard />
 
       {/* Profile */}
       <Card>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -117,11 +117,13 @@ export function ProjectDetailView() {
     if (!project) return
     const legacy = project.passwordVault?.trim()
     if (!legacy || (project.passwordEntries?.length ?? 0) > 0) return
-    updateProject(project.id, {
-      passwordEntries: [
-        { id: crypto.randomUUID(), label: "Imported notes", password: legacy },
-      ],
-      passwordVault: undefined,
+    startTransition(() => {
+      updateProject(project.id, {
+        passwordEntries: [
+          { id: crypto.randomUUID(), label: "Imported notes", password: legacy },
+        ],
+        passwordVault: undefined,
+      })
     })
   }, [
     project?.id,

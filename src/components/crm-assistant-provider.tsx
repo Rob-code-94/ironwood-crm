@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -238,7 +239,9 @@ The user must confirm before any task or project is saved. Prefer **General** wh
 
   const refreshThreadList = useCallback(async () => {
     if (!isWorkspaceFileSyncEnabled()) {
-      setSavedThreads(getSavedThreads())
+      startTransition(() => {
+        setSavedThreads(getSavedThreads())
+      })
       return
     }
     try {
@@ -261,7 +264,9 @@ The user must confirm before any task or project is saved. Prefer **General** wh
         status: t.status === "archived" ? "archived" : "active",
         data: undefined,
       }))
-      setSavedThreads(mapped)
+      startTransition(() => {
+        setSavedThreads(mapped)
+      })
     } catch {
       /* ignore */
     }
@@ -366,7 +371,9 @@ The user must confirm before any task or project is saved. Prefer **General** wh
           localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, activeId)
         }
       }
-      if (!cancelled && activeId) setActiveThreadId(activeId)
+      if (!cancelled && activeId) {
+        startTransition(() => setActiveThreadId(activeId))
+      }
 
       if (cancelled) return
 
@@ -417,7 +424,9 @@ The user must confirm before any task or project is saved. Prefer **General** wh
         }
       }
 
-      if (!cancelled && activeId) setActiveThreadId(activeId)
+      if (!cancelled && activeId) {
+        startTransition(() => setActiveThreadId(activeId))
+      }
       mountSubscribe()
     })()
 
