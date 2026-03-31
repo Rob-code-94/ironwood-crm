@@ -1,0 +1,30 @@
+---
+description: Require proof for external write operations
+globs:
+alwaysApply: true
+---
+
+# External write verification protocol
+
+When handling any request to create or update data in external systems (task tools, CRMs, ticket systems, docs platforms, databases, APIs), follow these rules strictly:
+
+1. Never claim success unless the write tool/API call returns success.
+2. After every write, perform read-after-write verification using the corresponding list/get/read endpoint.
+3. Only report "done", "created", "saved", or "updated" after verification confirms the item exists with expected fields.
+4. Include evidence in the reply:
+   - system name and workspace/environment
+   - created/updated record names and IDs
+   - key fields requested by user (e.g., due dates, status, owner)
+5. If any tool call fails, is aborted, times out, or is unauthorized:
+   - explicitly state the operation failed
+   - do not imply completion
+   - provide the exact failed step and next recovery step
+6. If the user says they cannot see an item in UI, re-query the same source of truth immediately and reconcile before making any further claims.
+
+Response contract for external writes:
+
+- "Planned" means no write attempted yet.
+- "Attempted" means write call was sent but not yet verified.
+- "Completed" is allowed only after successful read-after-write verification.
+
+If verification cannot be performed, respond with "Not verified; not completed."

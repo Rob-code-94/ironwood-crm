@@ -24,6 +24,7 @@ import {
   getSavedThreads,
   addSavedThread,
   deleteSavedThread,
+  updateSavedThread,
   type SavedThread,
 } from "@/lib/crm-assistant-storage"
 import {
@@ -59,8 +60,12 @@ type CrmAssistantUiValue = {
   setCommandMode: (v: boolean) => void
   resetThread: () => void
   saveAndNewThread: () => void
+  startNewThread: () => void
   loadThread: (id: string) => void
+  renameThread: (id: string, title: string) => void
+  archiveThread: (id: string) => void
   deleteThread: (id: string) => void
+  activeThreadId: string | null
   savedThreads: SavedThread[]
 }
 
@@ -241,10 +246,12 @@ The user must confirm before any task or project is saved. Prefer **General** wh
   const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
     getSavedThreads()
   )
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
 
   const resetThread = useCallback(() => {
     clearCrmAssistantThreadStorage()
     runtime.thread.reset()
+    setActiveThreadId(null)
   }, [runtime])
 
   const saveAndNewThread = useCallback(() => {
@@ -255,6 +262,7 @@ The user must confirm before any task or project is saved. Prefer **General** wh
         id: crypto.randomUUID(),
         title: threadTitle(exported),
         savedAt: new Date().toISOString(),
+        status: "active",
         data: exported,
       }
       addSavedThread(saved)
@@ -262,6 +270,7 @@ The user must confirm before any task or project is saved. Prefer **General** wh
     }
     clearCrmAssistantThreadStorage()
     runtime.thread.reset()
+    setActiveThreadId(null)
   }, [runtime])
 
   const loadThread = useCallback(
@@ -284,13 +293,28 @@ The user must confirm before any task or project is saved. Prefer **General** wh
           /* ignore */
         }
       }, 50)
+      setActiveThreadId(found.id)
     },
     [runtime]
   )
 
+  const renameThread = useCallback((id: string, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    updateSavedThread(id, { title: trimmed })
+    setSavedThreads(getSavedThreads())
+  }, [])
+
+  const archiveThread = useCallback((id: string) => {
+    updateSavedThread(id, { status: "archived" })
+    setSavedThreads(getSavedThreads())
+    setActiveThreadId((prev) => (prev === id ? null : prev))
+  }, [])
+
   const deleteThread = useCallback((id: string) => {
     deleteSavedThread(id)
     setSavedThreads(getSavedThreads())
+    setActiveThreadId((prev) => (prev === id ? null : prev))
   }, [])
 
   const uiValue = useMemo<CrmAssistantUiValue>(
@@ -299,11 +323,25 @@ The user must confirm before any task or project is saved. Prefer **General** wh
       setCommandMode,
       resetThread,
       saveAndNewThread,
+      startNewThread: saveAndNewThread,
       loadThread,
+      renameThread,
+      archiveThread,
       deleteThread,
+      activeThreadId,
       savedThreads,
     }),
-    [commandMode, resetThread, saveAndNewThread, loadThread, deleteThread, savedThreads]
+    [
+      commandMode,
+      resetThread,
+      saveAndNewThread,
+      loadThread,
+      renameThread,
+      archiveThread,
+      deleteThread,
+      activeThreadId,
+      savedThreads,
+    ]
   )
 
   return (

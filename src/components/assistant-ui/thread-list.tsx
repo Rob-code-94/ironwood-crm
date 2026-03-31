@@ -1,13 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type FC } from "react"
-import {
-  AuiIf,
-  ThreadListItemMorePrimitive,
-  ThreadListItemPrimitive,
-  ThreadListPrimitive,
-  useThreadListItemRuntime,
-} from "@assistant-ui/react"
+import { useEffect, useMemo, useRef, useState, type FC } from "react"
 import {
   ArchiveIcon,
   CheckIcon,
@@ -18,46 +11,62 @@ import {
   XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { useCrmAssistantUi } from "@/components/crm-assistant-provider"
+import { cn } from "@/lib/utils"
 
 export const ThreadList: FC = () => {
+  const { savedThreads, startNewThread, activeThreadId, loadThread } = useCrmAssistantUi()
+  const activeThreads = useMemo(
+    () => savedThreads.filter((thread) => thread.status !== "archived"),
+    [savedThreads]
+  )
+
   return (
-    <ThreadListPrimitive.Root className="flex w-full flex-col gap-1">
-      <ThreadListNew />
-      <AuiIf condition={(s) => s.threads.isLoading}>
-        <ThreadListSkeleton />
-      </AuiIf>
-      <AuiIf condition={(s) => !s.threads.isLoading}>
-        <ThreadListPrimitive.Items>{() => <ThreadListItem />}</ThreadListPrimitive.Items>
-      </AuiIf>
-    </ThreadListPrimitive.Root>
+    <div className="flex w-full flex-col gap-1">
+      <ThreadListNew onClick={startNewThread} />
+      {activeThreads.map((thread) => (
+        <ThreadListItem
+          key={thread.id}
+          id={thread.id}
+          title={thread.title}
+          active={activeThreadId === thread.id}
+          onLoad={() => loadThread(thread.id)}
+        />
+      ))}
+      {activeThreads.length === 0 ? (
+        <p className="px-2 py-1 text-xs text-muted-foreground">No saved threads yet.</p>
+      ) : null}
+    </div>
   )
 }
 
-const ThreadListNew: FC = () => (
-  <ThreadListPrimitive.New asChild>
-    <Button variant="outline" className="h-9 justify-start gap-2 rounded-lg px-3 text-sm">
+const ThreadListNew: FC<{ onClick: () => void }> = ({ onClick }) => (
+  <Button
+    variant="outline"
+    className="h-9 justify-start gap-2 rounded-lg px-3 text-sm"
+    onClick={onClick}
+  >
       <PlusIcon className="size-4" />
       New Thread
-    </Button>
-  </ThreadListPrimitive.New>
+  </Button>
 )
 
-const ThreadListSkeleton: FC = () => (
-  <div className="flex flex-col gap-1">
-    {Array.from({ length: 4 }, (_, i) => (
-      <div key={i} className="flex h-9 items-center px-3">
-        <Skeleton className="h-4 w-full" />
-      </div>
-    ))}
-  </div>
-)
-
-const ThreadListItem: FC = () => {
+const ThreadListItem: FC<{
+  id: string
+  title: string
+  active: boolean
+  onLoad: () => void
+}> = ({ id, title, active, onLoad }) => {
+  const { renameThread, archiveThread, deleteThread } = useCrmAssistantUi()
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState("")
-  const runtime = useThreadListItemRuntime()
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -68,14 +77,13 @@ const ThreadListItem: FC = () => {
   }, [renaming])
 
   const startRename = () => {
-    const title = runtime.getState().title ?? "New Chat"
     setDraft(title)
     setRenaming(true)
   }
 
   const commitRename = () => {
-    const title = draft.trim()
-    if (title) runtime.rename(title)
+    const nextTitle = draft.trim()
+    if (nextTitle) renameThread(id, nextTitle)
     setRenaming(false)
   }
 
@@ -107,55 +115,74 @@ const ThreadListItem: FC = () => {
   }
 
   return (
-    <ThreadListItemPrimitive.Root className="group flex h-9 items-center gap-2 rounded-lg transition-colors hover:bg-muted data-active:bg-muted">
-      <ThreadListItemPrimitive.Trigger className="flex h-full min-w-0 flex-1 items-center px-3 text-left text-sm">
+    <div
+      className={cn(
+        "group flex h-9 items-center gap-2 rounded-lg transition-colors hover:bg-muted",
+        active ? "bg-muted" : ""
+      )}
+    >
+      <button
+        type="button"
+        className="flex h-full min-w-0 flex-1 items-center px-3 text-left text-sm"
+        onClick={onLoad}
+      >
         <span className="min-w-0 flex-1 truncate">
-          <ThreadListItemPrimitive.Title fallback="New Chat" />
+          {title || "New Chat"}
         </span>
-      </ThreadListItemPrimitive.Trigger>
-      <ThreadListItemMore onRename={startRename} />
-    </ThreadListItemPrimitive.Root>
+      </button>
+      <ThreadListItemMore
+        onRename={startRename}
+        onArchive={() => archiveThread(id)}
+        onDelete={() => deleteThread(id)}
+      />
+    </div>
   )
 }
 
-const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => (
-  <ThreadListItemMorePrimitive.Root>
-    <ThreadListItemMorePrimitive.Trigger asChild>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="mr-2 size-7 p-0 opacity-0 transition-opacity group-hover:opacity-100 group-data-active:opacity-100"
-      >
-        <MoreHorizontalIcon className="size-4" />
-        <span className="sr-only">More options</span>
-      </Button>
-    </ThreadListItemMorePrimitive.Trigger>
-    <ThreadListItemMorePrimitive.Content
+const ThreadListItemMore: FC<{
+  onRename: () => void
+  onArchive: () => void
+  onDelete: () => void
+}> = ({ onRename, onArchive, onDelete }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger
+      render={
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mr-2 size-7 p-0 opacity-0 transition-opacity group-hover:opacity-100 group-data-active:opacity-100"
+        />
+      }
+    >
+      <MoreHorizontalIcon className="size-4" />
+      <span className="sr-only">More options</span>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent
       side="bottom"
       align="start"
       className="z-50 min-w-36 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
     >
-      <ThreadListItemMorePrimitive.Item
+      <DropdownMenuItem
         className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
         onClick={onRename}
       >
         <PencilIcon className="size-4" />
         Rename
-      </ThreadListItemMorePrimitive.Item>
-
-      <ThreadListItemPrimitive.Archive asChild>
-        <ThreadListItemMorePrimitive.Item className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground">
-          <ArchiveIcon className="size-4" />
-          Archive
-        </ThreadListItemMorePrimitive.Item>
-      </ThreadListItemPrimitive.Archive>
-
-      <ThreadListItemPrimitive.Delete asChild>
-        <ThreadListItemMorePrimitive.Item className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none hover:bg-destructive/10 hover:text-destructive">
-          <TrashIcon className="size-4" />
-          Delete
-        </ThreadListItemMorePrimitive.Item>
-      </ThreadListItemPrimitive.Delete>
-    </ThreadListItemMorePrimitive.Content>
-  </ThreadListItemMorePrimitive.Root>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+        onClick={onArchive}
+      >
+        <ArchiveIcon className="size-4" />
+        Archive
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none hover:bg-destructive/10 hover:text-destructive"
+        onClick={onDelete}
+      >
+        <TrashIcon className="size-4" />
+        Delete
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
 )

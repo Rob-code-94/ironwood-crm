@@ -7,6 +7,7 @@ export type SavedThread = {
   id: string
   title: string
   savedAt: string
+  status?: "active" | "archived"
   /** ExportedMessageRepository — typed as unknown to avoid pulling in @assistant-ui/core here */
   data: unknown
 }
@@ -36,10 +37,28 @@ export function addSavedThread(thread: SavedThread): void {
   if (typeof window === "undefined") return
   try {
     const existing = getSavedThreads().filter((t) => t.id !== thread.id)
-    const updated = [thread, ...existing].slice(0, MAX_SAVED_THREADS)
+    const updated = [{ ...thread, status: thread.status ?? "active" }, ...existing].slice(
+      0,
+      MAX_SAVED_THREADS
+    )
     localStorage.setItem(SAVED_THREADS_KEY, JSON.stringify(updated))
   } catch {
     /* quota / private mode */
+  }
+}
+
+export function updateSavedThread(
+  id: string,
+  patch: Partial<Pick<SavedThread, "title" | "status">>
+): void {
+  if (typeof window === "undefined") return
+  try {
+    const updated = getSavedThreads().map((thread) =>
+      thread.id === id ? { ...thread, ...patch } : thread
+    )
+    localStorage.setItem(SAVED_THREADS_KEY, JSON.stringify(updated))
+  } catch {
+    /* ignore */
   }
 }
 

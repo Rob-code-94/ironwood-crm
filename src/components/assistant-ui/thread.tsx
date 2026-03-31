@@ -11,6 +11,7 @@ import {
   CopyIcon,
   DownloadIcon,
   LoaderIcon,
+  ListChecksIcon,
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -38,15 +39,6 @@ import "@assistant-ui/react-markdown/styles/dot.css"
 
 import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -63,6 +55,7 @@ import {
 } from "@/lib/crm-ai-settings"
 import { useCrmAssistantUi } from "@/components/crm-assistant-provider"
 import { ComposerSlashAtInput } from "@/components/assistant-ui/composer-slash-at-input"
+import { ComposerSpeechButton } from "@/components/assistant-ui/composer-speech-button"
 
 const MarkdownText: TextMessagePartComponent = () => (
   <MarkdownTextPrimitive className="aui-md max-w-none text-foreground [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded-sm [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5" />
@@ -151,92 +144,6 @@ function ModelSelect() {
         ))}
       </SelectContent>
     </Select>
-  )
-}
-
-function ThreadHistoryMenu() {
-  const { saveAndNewThread, loadThread, deleteThread, savedThreads } =
-    useCrmAssistantUi()
-
-  function formatDate(iso: string) {
-    try {
-      return new Date(iso).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    } catch {
-      return iso
-    }
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label="Thread history"
-      >
-        <ChevronLeftIcon className="size-3 rotate-180" />
-        Threads
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
-            Saved threads
-          </DropdownMenuLabel>
-          {savedThreads.length === 0 ? (
-            <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-              No saved threads yet
-            </DropdownMenuItem>
-          ) : (
-            savedThreads.map((t) => (
-              <div key={t.id} className="flex items-center gap-1 px-1">
-                <DropdownMenuItem
-                  className="min-w-0 flex-1 flex-col items-start gap-0 py-1.5 text-xs cursor-pointer"
-                  onClick={() => loadThread(t.id)}
-                >
-                  <span className="truncate w-full font-medium">{t.title}</span>
-                  <span className="text-muted-foreground">{formatDate(t.savedAt)}</span>
-                </DropdownMenuItem>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
-                  title="Delete thread"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteThread(t.id)
-                  }}
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              </div>
-            ))
-          )}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem
-            className="text-xs cursor-pointer"
-            onClick={saveAndNewThread}
-          >
-            <PlusIcon className="mr-1.5 size-3" />
-            Save &amp; start new chat
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function ThreadHeader() {
-  return (
-    <div className="flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
-      <ThreadHistoryMenu />
-      <ModelSelect />
-    </div>
   )
 }
 
@@ -329,8 +236,6 @@ export function Thread() {
         } as React.CSSProperties
       }
     >
-      <ThreadHeader />
-
       <ThreadPrimitive.Viewport
         turnAnchor="top"
         className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scroll-smooth"
@@ -422,13 +327,30 @@ function ThreadWelcome() {
 }
 
 function Composer() {
+  const { commandMode } = useCrmAssistantUi()
+
   return (
     <ComposerPrimitive.Root className="flex w-full flex-col gap-0">
-      <ComposerPrimitive.AttachmentDropzone className="flex w-full flex-col gap-2 rounded-2xl border border-input bg-background p-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-dashed data-[dragging=true]:border-primary/50 data-[dragging=true]:bg-muted/40">
+      <ComposerPrimitive.AttachmentDropzone
+        className={cn(
+          "flex w-full flex-col gap-2 rounded-2xl border border-input bg-background p-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-dashed data-[dragging=true]:border-primary/50 data-[dragging=true]:bg-muted/40",
+          commandMode ? "border-primary/50 ring-2 ring-primary/20" : ""
+        )}
+      >
+        {commandMode ? (
+          <div className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+            <ListChecksIcon className="size-3.5" />
+            Planning Mode - describe all needed work first.
+          </div>
+        ) : null}
         <ComposerAttachments />
         <ComposerSlashAtInput
-          placeholder="Send a message…"
-          className="min-h-12 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+          placeholder={
+            commandMode
+              ? "Describe all the work needed - I'll plan it first..."
+              : "Ask about a client, /task, @client, or /plan..."
+          }
+          className="aui-composer-input min-h-12 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           rows={1}
           autoFocus
           aria-label="Message input"
@@ -440,9 +362,26 @@ function Composer() {
 }
 
 function ComposerAction() {
+  const { commandMode, setCommandMode } = useCrmAssistantUi()
+
   return (
     <div className="flex items-center justify-between gap-2 px-1 pb-1">
-      <ComposerAddAttachment />
+      <div className="flex items-center gap-1">
+        <ComposerAddAttachment />
+        <Button
+          type="button"
+          variant={commandMode ? "default" : "ghost"}
+          size="icon"
+          className="size-8 rounded-full"
+          title={commandMode ? "Exit planning mode" : "Enable planning mode"}
+          aria-label={commandMode ? "Exit planning mode" : "Enable planning mode"}
+          onClick={() => setCommandMode(!commandMode)}
+        >
+          <ListChecksIcon className="size-4" />
+        </Button>
+        <ComposerSpeechButton />
+        <ModelSelect />
+      </div>
 
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <ComposerPrimitive.Send asChild>
