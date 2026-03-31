@@ -20,6 +20,7 @@ import {
 import type { ExportedMessageRepository } from "@assistant-ui/core"
 import {
   CRM_ASSISTANT_THREAD_STORAGE_KEY,
+  CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY,
   clearCrmAssistantThreadStorage,
   getSavedThreads,
   addSavedThread,
@@ -27,6 +28,7 @@ import {
   updateSavedThread,
   type SavedThread,
 } from "@/lib/crm-assistant-storage"
+import { isWorkspaceFileSyncEnabled } from "@/lib/workspace/persist"
 import {
   FallbackDocumentAttachmentAdapter,
   useCrmChatModelAdapter,
@@ -55,16 +57,43 @@ function threadTitle(exported: ExportedMessageRepository): string {
   return `Chat on ${new Date().toLocaleDateString()}`
 }
 
+/** One-time: push legacy localStorage thread list into Firestore when cloud is empty */
+async function migrateLegacyAssistantThreadsToFirestore(): Promise<void> {
+  try {
+    const listRes = await fetch("/api/assistant/threads")
+    if (!listRes.ok) return
+    const listJson = (await listRes.json()) as { threads?: unknown[] }
+    if ((listJson.threads?.length ?? 0) > 0) return
+
+    const legacySaved = getSavedThreads()
+    for (const s of [...legacySaved].reverse()) {
+      const cre = await fetch("/api/assistant/threads", { method: "POST" })
+      if (!cre.ok) continue
+      const { remoteId } = (await cre.json()) as { remoteId: string }
+      await fetch(`/api/assistant/threads/${remoteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: s.title,
+          ...(s.data !== undefined ? { repository: s.data } : {}),
+        }),
+      })
+    }
+  } catch {
+    /* offline / api down */
+  }
+}
+
 type CrmAssistantUiValue = {
   commandMode: boolean
   setCommandMode: (v: boolean) => void
   resetThread: () => void
-  saveAndNewThread: () => void
-  startNewThread: () => void
-  loadThread: (id: string) => void
-  renameThread: (id: string, title: string) => void
-  archiveThread: (id: string) => void
-  deleteThread: (id: string) => void
+  saveAndNewThread: () => void | Promise<void>
+  startNewThread: () => void | Promise<void>
+  loadThread: (id: string) => void | Promise<void>
+  renameThread: (id: string, title: string) => void | Promise<void>
+  archiveThread: (id: string) => void | Promise<void>
+  deleteThread: (id: string) => void | Promise<void>
   activeThreadId: string | null
   savedThreads: SavedThread[]
 }
@@ -202,120 +231,397 @@ The user must confirm before any task or project is saved. Prefer **General** wh
     adapters: { attachments },
   })
 
+  const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
+    isWorkspaceFileSyncEnabled() ? [] : getSavedThreads()
+  )
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+
+  const refreshThreadList = useCallback(async () => {
+    if (!isWorkspaceFileSyncEnabled()) {
+      setSavedThreads(getSavedThreads())
+      return
+    }
+    try {
+      const res = await fetch("/api/assistant/threads")
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        threads: Array<{
+          remoteId: string
+          title?: string
+          status: string
+          updatedAt?: number
+        }>
+      }
+      const mapped: SavedThread[] = (data.threads ?? []).map((t) => ({
+        id: t.remoteId,
+        title: t.title?.trim() || "New Chat",
+        savedAt: new Date(
+          typeof t.updatedAt === "number" ? t.updatedAt : Date.now()
+        ).toISOString(),
+        status: t.status === "archived" ? "archived" : "active",
+        data: undefined,
+      }))
+      setSavedThreads(mapped)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   const loadedRef = useRef(false)
   useEffect(() => {
     if (typeof window === "undefined") return
     const thread = runtime.thread
+    let debounce: ReturnType<typeof setTimeout>
+    let cancelled = false
+    let unsub: (() => void) | undefined
 
-    if (!loadedRef.current) {
-      loadedRef.current = true
-      const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
-      if (raw) {
-        try {
-          const data = JSON.parse(raw) as ExportedMessageRepository
-          if (data && Array.isArray(data.messages)) {
-            thread.import(data)
+    const mountSubscribe = () => {
+      unsub = thread.subscribe(() => {
+        clearTimeout(debounce)
+        debounce = setTimeout(() => {
+          try {
+            const exported = thread.export()
+            localStorage.setItem(
+              CRM_ASSISTANT_THREAD_STORAGE_KEY,
+              JSON.stringify(exported)
+            )
+          } catch {
+            /* quota / private mode */
           }
-        } catch {
-          /* ignore corrupt storage */
-        }
-      }
+          if (!isWorkspaceFileSyncEnabled()) return
+          const remoteId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+          if (!remoteId) return
+          const exported = thread.export()
+          void fetch(`/api/assistant/threads/${remoteId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repository: exported }),
+          }).catch(() => {})
+        }, 800)
+      })
     }
 
-    let debounce: ReturnType<typeof setTimeout>
-    const unsub = thread.subscribe(() => {
-      clearTimeout(debounce)
-      debounce = setTimeout(() => {
-        try {
-          localStorage.setItem(
-            CRM_ASSISTANT_THREAD_STORAGE_KEY,
-            JSON.stringify(thread.export())
-          )
-        } catch {
-          /* quota / private mode */
+    void (async () => {
+      if (!isWorkspaceFileSyncEnabled()) {
+        if (!loadedRef.current) {
+          loadedRef.current = true
+          const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          if (raw) {
+            try {
+              const data = JSON.parse(raw) as ExportedMessageRepository
+              if (data && Array.isArray(data.messages)) {
+                thread.import(data)
+              }
+            } catch {
+              /* ignore corrupt storage */
+            }
+          }
         }
-      }, 400)
-    })
+        mountSubscribe()
+        return
+      }
+
+      await migrateLegacyAssistantThreadsToFirestore()
+      if (cancelled) return
+      await refreshThreadList()
+      if (cancelled) return
+
+      let activeId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+      const listRes = await fetch("/api/assistant/threads")
+      if (!listRes.ok) {
+        if (!loadedRef.current) {
+          loadedRef.current = true
+          const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          if (raw) {
+            try {
+              const data = JSON.parse(raw) as ExportedMessageRepository
+              if (data && Array.isArray(data.messages)) {
+                thread.import(data)
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        mountSubscribe()
+        return
+      }
+
+      const listJson = (await listRes.json()) as {
+        threads?: Array<{ remoteId: string }>
+      }
+      const threadsList = listJson.threads ?? []
+      const remoteIds = new Set(threadsList.map((t) => t.remoteId))
+
+      if (!activeId || !remoteIds.has(activeId)) {
+        let nextId = threadsList[0]?.remoteId ?? null
+        if (!nextId) {
+          const cre = await fetch("/api/assistant/threads", { method: "POST" })
+          if (cre.ok) {
+            nextId = ((await cre.json()) as { remoteId: string }).remoteId
+          }
+        }
+        activeId = nextId
+        if (activeId) {
+          localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, activeId)
+        }
+      }
+      if (!cancelled && activeId) setActiveThreadId(activeId)
+
+      if (cancelled) return
+
+      if (!loadedRef.current) {
+        loadedRef.current = true
+        let imported = false
+        if (activeId) {
+          const threadRes = await fetch(`/api/assistant/threads/${activeId}`)
+          if (threadRes.ok) {
+            const body = (await threadRes.json()) as { repository?: unknown }
+            const repo = body.repository
+            if (
+              repo &&
+              typeof repo === "object" &&
+              Array.isArray((repo as { messages?: unknown }).messages)
+            ) {
+              try {
+                thread.import(repo as ExportedMessageRepository)
+                imported = true
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        }
+        if (!imported) {
+          const legacyRaw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          if (legacyRaw) {
+            try {
+              const data = JSON.parse(legacyRaw) as ExportedMessageRepository
+              if (data && Array.isArray(data.messages) && data.messages.length > 0) {
+                thread.import(data)
+                if (activeId) {
+                  void fetch(`/api/assistant/threads/${activeId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      repository: data,
+                      title: threadTitle(data),
+                    }),
+                  })
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+
+      if (!cancelled && activeId) setActiveThreadId(activeId)
+      mountSubscribe()
+    })()
 
     return () => {
+      cancelled = true
       clearTimeout(debounce)
-      unsub()
+      unsub?.()
     }
-  }, [runtime])
-
-  const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
-    getSavedThreads()
-  )
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
-
-  const resetThread = useCallback(() => {
-    clearCrmAssistantThreadStorage()
-    runtime.thread.reset()
-    setActiveThreadId(null)
-  }, [runtime])
-
-  const saveAndNewThread = useCallback(() => {
-    const exported = runtime.thread.export()
-    const messages = (exported as { messages?: unknown[] }).messages ?? []
-    if (messages.length > 0) {
-      const saved: SavedThread = {
-        id: crypto.randomUUID(),
-        title: threadTitle(exported),
-        savedAt: new Date().toISOString(),
-        status: "active",
-        data: exported,
-      }
-      addSavedThread(saved)
-      setSavedThreads(getSavedThreads())
-    }
-    clearCrmAssistantThreadStorage()
-    runtime.thread.reset()
-    setActiveThreadId(null)
-  }, [runtime])
+  }, [runtime, refreshThreadList])
 
   const loadThread = useCallback(
-    (id: string) => {
-      const threads = getSavedThreads()
-      const found = threads.find((t) => t.id === id)
-      if (!found) return
+    async (id: string) => {
+      if (!isWorkspaceFileSyncEnabled()) {
+        const threads = getSavedThreads()
+        const found = threads.find((t) => t.id === id)
+        if (!found) return
+        clearCrmAssistantThreadStorage()
+        runtime.thread.reset()
+        setTimeout(() => {
+          try {
+            runtime.thread.import(found.data as ExportedMessageRepository)
+            localStorage.setItem(
+              CRM_ASSISTANT_THREAD_STORAGE_KEY,
+              JSON.stringify(found.data)
+            )
+          } catch {
+            /* ignore */
+          }
+        }, 50)
+        setActiveThreadId(found.id)
+        return
+      }
+
       clearCrmAssistantThreadStorage()
       runtime.thread.reset()
-      // Small delay so reset propagates before we import
+      localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, id)
+      setActiveThreadId(id)
+      const r = await fetch(`/api/assistant/threads/${id}`)
+      if (!r.ok) return
+      const body = (await r.json()) as { repository?: unknown }
       setTimeout(() => {
         try {
-          runtime.thread.import(found.data as ExportedMessageRepository)
-          // Persist so the loaded thread auto-saves going forward
-          localStorage.setItem(
-            CRM_ASSISTANT_THREAD_STORAGE_KEY,
-            JSON.stringify(found.data)
-          )
+          const repo = body.repository
+          if (
+            repo &&
+            typeof repo === "object" &&
+            Array.isArray((repo as { messages?: unknown }).messages)
+          ) {
+            runtime.thread.import(repo as ExportedMessageRepository)
+            localStorage.setItem(
+              CRM_ASSISTANT_THREAD_STORAGE_KEY,
+              JSON.stringify(repo)
+            )
+          }
         } catch {
           /* ignore */
         }
       }, 50)
-      setActiveThreadId(found.id)
     },
     [runtime]
   )
 
-  const renameThread = useCallback((id: string, title: string) => {
-    const trimmed = title.trim()
-    if (!trimmed) return
-    updateSavedThread(id, { title: trimmed })
-    setSavedThreads(getSavedThreads())
-  }, [])
+  const ensureActiveRemoteThreadAfterRemoval = useCallback(
+    async (removedId: string) => {
+      const active = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+      if (active !== removedId) {
+        await refreshThreadList()
+        return
+      }
+      const listRes = await fetch("/api/assistant/threads")
+      let nextId: string | null = null
+      if (listRes.ok) {
+        const listJson = (await listRes.json()) as {
+          threads?: Array<{ remoteId: string }>
+        }
+        nextId = listJson.threads?.[0]?.remoteId ?? null
+      }
+      if (!nextId) {
+        const cre = await fetch("/api/assistant/threads", { method: "POST" })
+        if (cre.ok) {
+          nextId = ((await cre.json()) as { remoteId: string }).remoteId
+        }
+      }
+      if (nextId) {
+        await loadThread(nextId)
+      } else {
+        localStorage.removeItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+        setActiveThreadId(null)
+        clearCrmAssistantThreadStorage()
+        runtime.thread.reset()
+      }
+      await refreshThreadList()
+    },
+    [loadThread, refreshThreadList, runtime]
+  )
 
-  const archiveThread = useCallback((id: string) => {
-    updateSavedThread(id, { status: "archived" })
-    setSavedThreads(getSavedThreads())
-    setActiveThreadId((prev) => (prev === id ? null : prev))
-  }, [])
+  const resetThread = useCallback(() => {
+    clearCrmAssistantThreadStorage()
+    runtime.thread.reset()
+    if (isWorkspaceFileSyncEnabled()) {
+      const id = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+      if (id) {
+        const empty = runtime.thread.export()
+        void fetch(`/api/assistant/threads/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repository: empty }),
+        }).catch(() => {})
+      }
+    } else {
+      setActiveThreadId(null)
+    }
+  }, [runtime])
 
-  const deleteThread = useCallback((id: string) => {
-    deleteSavedThread(id)
-    setSavedThreads(getSavedThreads())
-    setActiveThreadId((prev) => (prev === id ? null : prev))
-  }, [])
+  const saveAndNewThread = useCallback(async () => {
+    if (!isWorkspaceFileSyncEnabled()) {
+      const exported = runtime.thread.export()
+      const messages = (exported as { messages?: unknown[] }).messages ?? []
+      if (messages.length > 0) {
+        const saved: SavedThread = {
+          id: crypto.randomUUID(),
+          title: threadTitle(exported),
+          savedAt: new Date().toISOString(),
+          status: "active",
+          data: exported,
+        }
+        addSavedThread(saved)
+        setSavedThreads(getSavedThreads())
+      }
+      clearCrmAssistantThreadStorage()
+      runtime.thread.reset()
+      setActiveThreadId(null)
+      return
+    }
+
+    const currentId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+    const exported = runtime.thread.export()
+    if (currentId) {
+      await fetch(`/api/assistant/threads/${currentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repository: exported }),
+      }).catch(() => {})
+    }
+    const cre = await fetch("/api/assistant/threads", { method: "POST" })
+    if (!cre.ok) return
+    const { remoteId } = (await cre.json()) as { remoteId: string }
+    localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, remoteId)
+    clearCrmAssistantThreadStorage()
+    runtime.thread.reset()
+    setActiveThreadId(remoteId)
+    await refreshThreadList()
+  }, [runtime, refreshThreadList])
+
+  const renameThread = useCallback(
+    async (id: string, title: string) => {
+      const trimmed = title.trim()
+      if (!trimmed) return
+      if (!isWorkspaceFileSyncEnabled()) {
+        updateSavedThread(id, { title: trimmed })
+        setSavedThreads(getSavedThreads())
+        return
+      }
+      await fetch(`/api/assistant/threads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      })
+      await refreshThreadList()
+    },
+    [refreshThreadList]
+  )
+
+  const archiveThread = useCallback(
+    async (id: string) => {
+      if (!isWorkspaceFileSyncEnabled()) {
+        updateSavedThread(id, { status: "archived" })
+        setSavedThreads(getSavedThreads())
+        setActiveThreadId((prev) => (prev === id ? null : prev))
+        return
+      }
+      await fetch(`/api/assistant/threads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "archived" }),
+      })
+      await ensureActiveRemoteThreadAfterRemoval(id)
+    },
+    [ensureActiveRemoteThreadAfterRemoval]
+  )
+
+  const deleteThread = useCallback(
+    async (id: string) => {
+      if (!isWorkspaceFileSyncEnabled()) {
+        deleteSavedThread(id)
+        setSavedThreads(getSavedThreads())
+        setActiveThreadId((prev) => (prev === id ? null : prev))
+        return
+      }
+      await fetch(`/api/assistant/threads/${id}`, { method: "DELETE" })
+      await ensureActiveRemoteThreadAfterRemoval(id)
+    },
+    [ensureActiveRemoteThreadAfterRemoval]
+  )
 
   const uiValue = useMemo<CrmAssistantUiValue>(
     () => ({

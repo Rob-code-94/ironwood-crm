@@ -1,4 +1,6 @@
 export const CRM_ASSISTANT_THREAD_STORAGE_KEY = "ironwood.crmAssistant.thread.v1"
+/** Firestore-backed assistant: which thread document is active in this browser */
+export const CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY = "ironwood.crmAssistant.activeRemoteThreadId.v1"
 export const SAVED_THREADS_KEY = "ironwood.crmAssistant.savedThreads.v1"
 
 const MAX_SAVED_THREADS = 20

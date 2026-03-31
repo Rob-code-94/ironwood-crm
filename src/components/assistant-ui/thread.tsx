@@ -503,13 +503,19 @@ function AssistantMessage() {
         />
         <MessageError />
         <AuiIf
-          condition={(s) =>
-            s.thread.isRunning && s.message.content.length === 0
-          }
+          condition={(s) => s.thread.isRunning && s.message.content.length === 0}
         >
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <LoaderIcon className="size-4 animate-spin" />
-            <span className="text-sm">Thinking...</span>
+          <div className="mt-1 flex items-center gap-2 text-muted-foreground">
+            <LoaderIcon className="size-4 shrink-0 animate-spin" />
+            <span className="text-sm">Thinking…</span>
+          </div>
+        </AuiIf>
+        <AuiIf
+          condition={(s) => s.thread.isRunning && s.message.content.length > 0}
+        >
+          <div className="mt-1 flex items-center gap-2 text-muted-foreground/90">
+            <LoaderIcon className="size-4 shrink-0 animate-spin" />
+            <span className="text-sm">Working…</span>
           </div>
         </AuiIf>
         <div className="mt-2 flex min-h-6 flex-wrap items-center gap-1">

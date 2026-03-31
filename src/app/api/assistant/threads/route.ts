@@ -11,6 +11,7 @@ export async function GET() {
       status: t.status,
       remoteId: t.remoteId,
       title: t.title,
+      updatedAt: t.updatedAt,
       externalId: undefined,
     }))
   return NextResponse.json({ threads })

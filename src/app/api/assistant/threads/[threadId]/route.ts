@@ -18,6 +18,7 @@ export async function GET(
     remoteId: thread.remoteId,
     title: thread.title,
     externalId: undefined,
+    ...(thread.repository !== undefined ? { repository: thread.repository } : {}),
   })
 }
 
@@ -26,11 +27,18 @@ export async function PATCH(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const { threadId } = await params
-  const body = (await req.json().catch(() => ({}))) as { title?: string; status?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    title?: string
+    status?: string
+    repository?: unknown
+  }
   const ok = await updateThreadPersistent(threadId, {
     ...(body.title !== undefined ? { title: body.title } : {}),
     ...(body.status === "regular" || body.status === "archived"
       ? { status: body.status }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, "repository")
+      ? { repository: body.repository as unknown | null }
       : {}),
   })
   if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 })
