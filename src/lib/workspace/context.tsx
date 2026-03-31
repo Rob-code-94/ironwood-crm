@@ -208,6 +208,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!remote || cancelled) return
       const remoteT = remote.persistedAt ?? 0
       if (remoteT < localPersistedAt) return
+      const localSnap = loadWorkspaceSnapshot()
+      const localHasData =
+        (localSnap?.projects?.length ?? 0) > 0 ||
+        (localSnap?.tasks?.length ?? 0) > 0 ||
+        (localSnap?.contacts?.length ?? 0) > 0 ||
+        (localSnap?.companies?.length ?? 0) > 0 ||
+        (localSnap?.deals?.length ?? 0) > 0
+      const remoteLooksEmpty =
+        remote.projects.length === 0 &&
+        remote.tasks.length === 0 &&
+        remote.contacts.length === 0 &&
+        remote.companies.length === 0 &&
+        remote.deals.length === 0
+      if (localHasData && remoteLooksEmpty && remoteT === 0) return
       setProjects(remote.projects)
       setTasks(remote.tasks)
       setContacts(remote.contacts)

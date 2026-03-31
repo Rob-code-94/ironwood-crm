@@ -37,6 +37,25 @@ export function isWorkspaceFileSyncEnabled(): boolean {
   return process.env.NEXT_PUBLIC_IRONWOOD_WORKSPACE_SYNC !== "0"
 }
 
+/** Valid empty snapshot for first-time Firestore reads (no doc yet). */
+export function emptyWorkspaceSnapshot(): WorkspaceSnapshotV1 {
+  return {
+    version: 1,
+    projects: [],
+    tasks: [],
+    contacts: [],
+    companies: [],
+    deals: [],
+    selectedProjectFilterId: "all",
+    savedChatTurns: [],
+    documents: [],
+    calendarEvents: [],
+    taskDefaultDueOffsetDays: null,
+    // No timestamp — merge logic treats this as bootstrap empty (won't beat real local data).
+    persistedAt: undefined,
+  }
+}
+
 export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 | null {
   if (!data || typeof data !== "object") return null
   const d = data as Record<string, unknown>

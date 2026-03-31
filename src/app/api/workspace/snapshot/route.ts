@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getFirebaseAdminFirestore } from "@/lib/firebase-admin"
-import { normalizeWorkspaceSnapshot } from "@/lib/workspace/persist"
+import { emptyWorkspaceSnapshot, normalizeWorkspaceSnapshot } from "@/lib/workspace/persist"
 
 export const runtime = "nodejs"
 
@@ -53,6 +53,8 @@ export async function GET() {
         }
         return NextResponse.json(parsed)
       }
+      // Firestore is live but no workspace doc yet — return empty snapshot so clients can sync (PUT will create it).
+      return NextResponse.json(emptyWorkspaceSnapshot())
     } catch {
       // Fall through to file-based sync so local dev remains usable while Firestore is provisioning.
     }
