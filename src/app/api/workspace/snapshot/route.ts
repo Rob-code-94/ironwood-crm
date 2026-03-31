@@ -102,7 +102,13 @@ export async function PUT(req: Request) {
 
   const parsedWrap = parseWorkspacePutPayload(body)
   if (!parsedWrap) {
-    return NextResponse.json({ error: "Body is not a valid workspace snapshot." }, { status: 422 })
+    return NextResponse.json(
+      {
+        error: "Body is not a valid workspace snapshot.",
+        invalidWorkspacePutBody: true,
+      },
+      { status: 422 }
+    )
   }
 
   const { snapshot: parsed, expectedPersistedAt } = parsedWrap
