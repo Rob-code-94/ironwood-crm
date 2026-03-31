@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
-import { createThread, listThreads } from "@/lib/assistant/thread-store"
+import {
+  createThreadPersistent,
+  listThreadsPersistent,
+} from "@/lib/assistant/thread-store"
 
 export async function GET() {
-  const threads = listThreads()
+  const threads = (await listThreadsPersistent())
     .filter((t) => t.status !== "archived")
     .map((t) => ({
       status: t.status,
@@ -14,6 +17,6 @@ export async function GET() {
 }
 
 export async function POST() {
-  const thread = createThread()
+  const thread = await createThreadPersistent()
   return NextResponse.json({ remoteId: thread.remoteId, externalId: undefined })
 }

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server"
-import { deleteThread, getThread, updateThread } from "@/lib/assistant/thread-store"
+import {
+  deleteThreadPersistent,
+  getThreadPersistent,
+  updateThreadPersistent,
+} from "@/lib/assistant/thread-store"
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const { threadId } = await params
-  const thread = getThread(threadId)
+  const thread = await getThreadPersistent(threadId)
   if (!thread) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   return NextResponse.json({
@@ -23,7 +27,7 @@ export async function PATCH(
 ) {
   const { threadId } = await params
   const body = (await req.json().catch(() => ({}))) as { title?: string; status?: string }
-  const ok = updateThread(threadId, {
+  const ok = await updateThreadPersistent(threadId, {
     ...(body.title !== undefined ? { title: body.title } : {}),
     ...(body.status === "regular" || body.status === "archived"
       ? { status: body.status }
@@ -38,6 +42,6 @@ export async function DELETE(
   { params }: { params: Promise<{ threadId: string }> }
 ) {
   const { threadId } = await params
-  deleteThread(threadId)
+  await deleteThreadPersistent(threadId)
   return NextResponse.json({ ok: true })
 }
