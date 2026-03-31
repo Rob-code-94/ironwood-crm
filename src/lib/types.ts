@@ -32,6 +32,8 @@ export interface Project {
   passwordEntries?: ProjectPasswordEntry[]
   /** @deprecated Use `passwordEntries`; migrated automatically in the project UI */
   passwordVault?: string
+  /** Inline notes for this project (not file uploads — see documents). */
+  notes?: ProjectNote[]
 }
 
 export interface ProjectPasswordEntry {
@@ -41,6 +43,14 @@ export interface ProjectPasswordEntry {
   login?: string
   password?: string
   url?: string
+}
+
+/** Short scratch notes / mini-docs scoped to one project (plain text, local workspace). */
+export interface ProjectNote {
+  id: string
+  title: string
+  body: string
+  updatedAt: string
 }
 
 export interface Task {

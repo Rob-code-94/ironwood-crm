@@ -12,12 +12,14 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   ArrowLeft,
   ArrowSquareOut,
+  CaretRight,
   CheckSquare,
   Eye,
   EyeSlash,
   Files,
   Key,
   ListChecks,
+  NotePencil,
   Plus,
   Trash,
 } from "@phosphor-icons/react/dist/ssr"
@@ -30,8 +32,13 @@ import { ResourceLinks } from "@/components/resource-links"
 import { parseKeyValueLines, recordToKeyValueLines } from "@/lib/kv-lines"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { ProjectLifecycleStatus, ProjectPasswordEntry } from "@/lib/types"
+import type { ProjectLifecycleStatus, ProjectNote, ProjectPasswordEntry } from "@/lib/types"
 import { documentTypeFromFileName, maybeImagePreviewDataUrl } from "@/lib/document-upload"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 
 const statusColor: Record<ProjectLifecycleStatus, "default" | "secondary" | "outline"> = {
   active: "default",
@@ -52,6 +59,16 @@ function hrefFromUrlInput(raw: string): string | null {
   if (/^https?:\/\//i.test(t)) return t
   if (/^[\w.-]+\.[a-z]{2,}([/:?#].*)?$/i.test(t)) return `https://${t}`
   return t.startsWith("/") ? t : `https://${t}`
+}
+
+const PROJECT_NOTE_BODY_MAX = 16_000
+
+function projectNotePreview(note: ProjectNote): string {
+  const t = note.title.trim()
+  if (t) return t.length > 72 ? `${t.slice(0, 69)}…` : t
+  const first = note.body.trim().split(/\n/)[0]?.trim() ?? ""
+  if (first) return first.length > 72 ? `${first.slice(0, 69)}…` : first
+  return "Untitled note"
 }
 
 function ProjectCustomFieldsCard({
@@ -108,6 +125,10 @@ export function ProjectDetailView() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
   const [passwordReveal, setPasswordReveal] = useState<Record<string, boolean>>({})
+  const [passwordVaultOpen, setPasswordVaultOpen] = useState(false)
+  const [editingPasswordEntryId, setEditingPasswordEntryId] = useState<string | null>(null)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id])
@@ -133,6 +154,42 @@ export function ProjectDetailView() {
   ])
 
   const passwordEntries = project?.passwordEntries ?? []
+  const projectNotes = useMemo(() => {
+    const list = project?.notes ?? []
+    return [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }, [project?.notes])
+
+  function patchProjectNote(
+    noteId: string,
+    patch: Partial<Pick<ProjectNote, "title" | "body">>
+  ) {
+    const list = project?.notes ?? []
+    const next = list.map((n) =>
+      n.id === noteId
+        ? { ...n, ...patch, updatedAt: new Date().toISOString() }
+        : n
+    )
+    updateProject(id, { notes: next.length ? next : undefined })
+  }
+
+  function addProjectNote() {
+    const note: ProjectNote = {
+      id: crypto.randomUUID(),
+      title: "",
+      body: "",
+      updatedAt: new Date().toISOString(),
+    }
+    updateProject(id, { notes: [...(project?.notes ?? []), note] })
+    setNotesOpen(true)
+    setEditingNoteId(note.id)
+  }
+
+  function removeProjectNote(noteId: string) {
+    if (!window.confirm("Delete this note?")) return
+    const next = (project?.notes ?? []).filter((n) => n.id !== noteId)
+    updateProject(id, { notes: next.length ? next : undefined })
+    setEditingNoteId((cur) => (cur === noteId ? null : cur))
+  }
 
   function patchPasswordEntry(
     entryId: string,
@@ -154,7 +211,8 @@ export function ProjectDetailView() {
     updateProject(id, {
       passwordEntries: [...(project?.passwordEntries ?? []), entry],
     })
-    toast.success("New login added — edit below")
+    setPasswordVaultOpen(true)
+    setEditingPasswordEntryId(entry.id)
   }
 
   function removePasswordEntry(entryId: string) {
@@ -166,6 +224,7 @@ export function ProjectDetailView() {
       delete next[entryId]
       return next
     })
+    setEditingPasswordEntryId((cur) => (cur === entryId ? null : cur))
     toast.success("Login removed")
   }
 
@@ -252,8 +311,8 @@ export function ProjectDetailView() {
         }}
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="md:col-span-2">
+      <div className="grid min-w-0 gap-4 md:grid-cols-3">
+        <Card className="min-w-0 overflow-hidden md:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2">
               <CheckSquare size={18} />
@@ -264,9 +323,9 @@ export function ProjectDetailView() {
               Add Task
             </Button>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-md border">
-              <table className="w-full text-sm">
+          <CardContent className="min-w-0">
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium">Task</th>
@@ -335,7 +394,142 @@ export function ProjectDetailView() {
         </Card>
 
         <div className="flex flex-col gap-4 min-w-0">
-          <Card className="flex h-72 flex-col overflow-hidden">
+          <Card className="overflow-hidden p-0 gap-0 shadow-none">
+            <Collapsible
+              open={notesOpen}
+              onOpenChange={(open) => {
+                setNotesOpen(open)
+                if (!open) setEditingNoteId(null)
+              }}
+            >
+              <CollapsibleTrigger
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none transition-colors",
+                  "hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+                )}
+                title="Plain-text notes stored in your workspace"
+              >
+                <NotePencil size={16} className="shrink-0 text-muted-foreground" />
+                <span className="font-medium">Notes</span>
+                <span className="text-muted-foreground tabular-nums">
+                  {projectNotes.length === 0 ? "—" : projectNotes.length}
+                </span>
+                <CaretRight
+                  size={16}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground transition-transform duration-200",
+                    notesOpen && "rotate-90"
+                  )}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="max-h-[min(26rem,52vh)] space-y-2 overflow-y-auto border-t px-3 py-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 w-full gap-1 sm:w-auto"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      addProjectNote()
+                    }}
+                  >
+                    <Plus size={14} />
+                    Add note
+                  </Button>
+                  {projectNotes.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-1">
+                      Jot meeting outcomes, links, or specs. Edits save as you type.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5 pb-1">
+                      {projectNotes.map((note) => {
+                        const editing = editingNoteId === note.id
+                        return (
+                          <li
+                            key={note.id}
+                            className="overflow-hidden rounded-lg border bg-muted/15"
+                          >
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                onClick={() =>
+                                  setEditingNoteId(editing ? null : note.id)
+                                }
+                              >
+                                <span className="truncate">{projectNotePreview(note)}</span>
+                                <CaretRight
+                                  size={14}
+                                  className={cn(
+                                    "ml-auto shrink-0 text-muted-foreground transition-transform",
+                                    editing && "rotate-90"
+                                  )}
+                                />
+                              </button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                                aria-label="Delete note"
+                                onClick={() => removeProjectNote(note.id)}
+                              >
+                                <Trash size={16} />
+                              </Button>
+                            </div>
+                            {editing ? (
+                              <div className="space-y-2 border-t bg-background/80 p-2">
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pn-title-${note.id}`} className="text-xs">
+                                    Title
+                                  </Label>
+                                  <Input
+                                    id={`pn-title-${note.id}`}
+                                    placeholder="Short label"
+                                    value={note.title}
+                                    onChange={(e) =>
+                                      patchProjectNote(note.id, { title: e.target.value })
+                                    }
+                                    maxLength={200}
+                                    autoComplete="off"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pn-body-${note.id}`} className="text-xs">
+                                    Content
+                                  </Label>
+                                  <Textarea
+                                    id={`pn-body-${note.id}`}
+                                    placeholder="Write here…"
+                                    value={note.body}
+                                    onChange={(e) =>
+                                      patchProjectNote(note.id, {
+                                        body: e.target.value.slice(0, PROJECT_NOTE_BODY_MAX),
+                                      })
+                                    }
+                                    rows={5}
+                                    className="min-h-[5.5rem] resize-y text-sm"
+                                    maxLength={PROJECT_NOTE_BODY_MAX}
+                                  />
+                                </div>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {note.body.length.toLocaleString()} /{" "}
+                                  {PROJECT_NOTE_BODY_MAX.toLocaleString()} characters
+                                </p>
+                              </div>
+                            ) : null}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </Card>
+
+          <Card className="flex h-72 min-w-0 flex-col overflow-hidden">
             <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b py-3">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
                 <Files size={16} />
@@ -425,157 +619,200 @@ export function ProjectDetailView() {
             </CardContent>
           </Card>
 
-          <Card className="flex max-h-[min(28rem,55vh)] flex-col overflow-hidden">
-            <CardHeader className="shrink-0 space-y-2 border-b py-3">
-              <div className="flex flex-row items-start justify-between gap-2">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                    <Key size={16} />
-                    Passwords and logins
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground font-normal leading-relaxed">
-                    Each entry saves as you type (stored locally, not encrypted). Use a password
-                    manager for highly sensitive accounts.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 gap-1"
-                  onClick={addPasswordEntry}
-                >
-                  <Plus size={14} />
-                  Add password
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-              {passwordEntries.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8 px-2">
-                  No saved logins yet. Click <span className="font-medium text-foreground">Add password</span>{" "}
-                  to add a site name, login, password, and URL.
-                </p>
-              ) : (
-                <ul className="space-y-4">
-                  {passwordEntries.map((entry) => {
-                    const openHref = hrefFromUrlInput(entry.url ?? "")
-                    const showPw = Boolean(passwordReveal[entry.id])
-                    return (
-                      <li
-                        key={entry.id}
-                        className="rounded-xl border bg-muted/20 p-3 space-y-3 shadow-xs/5"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            Saved login
-                          </p>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="shrink-0 text-muted-foreground hover:text-destructive -mt-1 -me-1"
-                            aria-label="Remove this login"
-                            onClick={() => removePasswordEntry(entry.id)}
+          <Card className="overflow-hidden p-0 gap-0 shadow-none">
+            <Collapsible
+              open={passwordVaultOpen}
+              onOpenChange={(open) => {
+                setPasswordVaultOpen(open)
+                if (!open) setEditingPasswordEntryId(null)
+              }}
+            >
+              <CollapsibleTrigger
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none transition-colors",
+                  "hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+                )}
+                title="Stored locally only, not encrypted — use a password manager for sensitive accounts"
+              >
+                <Key size={16} className="shrink-0 text-muted-foreground" />
+                <span className="font-medium">Logins</span>
+                <span className="text-muted-foreground tabular-nums">
+                  {passwordEntries.length === 0 ? "—" : passwordEntries.length}
+                </span>
+                <CaretRight
+                  size={16}
+                  className={cn(
+                    "ml-auto shrink-0 text-muted-foreground transition-transform duration-200",
+                    passwordVaultOpen && "rotate-90"
+                  )}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="max-h-[min(22rem,48vh)] space-y-2 overflow-y-auto border-t px-3 py-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 w-full gap-1 sm:w-auto"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      addPasswordEntry()
+                    }}
+                  >
+                    <Plus size={14} />
+                    Add login
+                  </Button>
+                  {passwordEntries.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-1">
+                      Open this panel to add entries. Changes save as you type.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5 pb-1">
+                      {passwordEntries.map((entry) => {
+                        const openHref = hrefFromUrlInput(entry.url ?? "")
+                        const showPw = Boolean(passwordReveal[entry.id])
+                        const editing = editingPasswordEntryId === entry.id
+                        const title = entry.label?.trim() || "Untitled login"
+                        return (
+                          <li
+                            key={entry.id}
+                            className="overflow-hidden rounded-lg border bg-muted/15"
                           >
-                            <Trash size={16} />
-                          </Button>
-                        </div>
-                        <div className="space-y-2">
-                          <div className="space-y-1">
-                            <Label htmlFor={`pe-name-${entry.id}`} className="text-xs">
-                              Name
-                            </Label>
-                            <Input
-                              id={`pe-name-${entry.id}`}
-                              placeholder="e.g. CAQH ProView"
-                              value={entry.label ?? ""}
-                              onChange={(e) => patchPasswordEntry(entry.id, { label: e.target.value })}
-                              autoComplete="off"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor={`pe-login-${entry.id}`} className="text-xs">
-                              Login
-                            </Label>
-                            <Input
-                              id={`pe-login-${entry.id}`}
-                              placeholder="Email or username"
-                              value={entry.login ?? ""}
-                              onChange={(e) => patchPasswordEntry(entry.id, { login: e.target.value })}
-                              autoComplete="off"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor={`pe-pw-${entry.id}`} className="text-xs">
-                              Password
-                            </Label>
-                            <div className="flex gap-2">
-                              <Input
-                                id={`pe-pw-${entry.id}`}
-                                type={showPw ? "text" : "password"}
-                                placeholder="••••••••"
-                                value={entry.password ?? ""}
-                                onChange={(e) =>
-                                  patchPasswordEntry(entry.id, { password: e.target.value })
-                                }
-                                className="min-w-0 flex-1 font-mono text-sm"
-                                autoComplete="new-password"
-                              />
-                              <Button
+                            <div className="flex items-center gap-1">
+                              <button
                                 type="button"
-                                variant="outline"
-                                size="icon"
-                                className="shrink-0"
-                                aria-label={showPw ? "Hide password" : "Show password"}
+                                className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                                 onClick={() =>
-                                  setPasswordReveal((r) => ({
-                                    ...r,
-                                    [entry.id]: !r[entry.id],
-                                  }))
+                                  setEditingPasswordEntryId(editing ? null : entry.id)
                                 }
                               >
-                                {showPw ? <EyeSlash size={18} /> : <Eye size={18} />}
+                                <span className="truncate">{title}</span>
+                                <CaretRight
+                                  size={14}
+                                  className={cn(
+                                    "ml-auto shrink-0 text-muted-foreground transition-transform",
+                                    editing && "rotate-90"
+                                  )}
+                                />
+                              </button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                                aria-label="Remove this login"
+                                onClick={() => removePasswordEntry(entry.id)}
+                              >
+                                <Trash size={16} />
                               </Button>
                             </div>
-                          </div>
-                          <div className="space-y-1">
-                            <Label htmlFor={`pe-url-${entry.id}`} className="text-xs">
-                              URL
-                            </Label>
-                            <div className="flex gap-2">
-                              <Input
-                                id={`pe-url-${entry.id}`}
-                                type="url"
-                                placeholder="https://…"
-                                value={entry.url ?? ""}
-                                onChange={(e) => patchPasswordEntry(entry.id, { url: e.target.value })}
-                                className="min-w-0 flex-1"
-                                autoComplete="off"
-                              />
-                              {openHref ? (
-                                <a
-                                  href={openHref}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="Open link"
-                                  className={cn(
-                                    buttonVariants({ variant: "outline", size: "icon" }),
-                                    "shrink-0"
-                                  )}
-                                >
-                                  <ArrowSquareOut size={18} />
-                                </a>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </CardContent>
+                            {editing ? (
+                              <div className="space-y-2 border-t bg-background/80 p-2">
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pe-name-${entry.id}`} className="text-xs">
+                                    Name
+                                  </Label>
+                                  <Input
+                                    id={`pe-name-${entry.id}`}
+                                    placeholder="e.g. CAQH ProView"
+                                    value={entry.label ?? ""}
+                                    onChange={(e) =>
+                                      patchPasswordEntry(entry.id, { label: e.target.value })
+                                    }
+                                    autoComplete="off"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pe-login-${entry.id}`} className="text-xs">
+                                    Login
+                                  </Label>
+                                  <Input
+                                    id={`pe-login-${entry.id}`}
+                                    placeholder="Email or username"
+                                    value={entry.login ?? ""}
+                                    onChange={(e) =>
+                                      patchPasswordEntry(entry.id, { login: e.target.value })
+                                    }
+                                    autoComplete="off"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pe-pw-${entry.id}`} className="text-xs">
+                                    Password
+                                  </Label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      id={`pe-pw-${entry.id}`}
+                                      type={showPw ? "text" : "password"}
+                                      placeholder="••••••••"
+                                      value={entry.password ?? ""}
+                                      onChange={(e) =>
+                                        patchPasswordEntry(entry.id, {
+                                          password: e.target.value,
+                                        })
+                                      }
+                                      className="min-w-0 flex-1 font-mono text-sm"
+                                      autoComplete="new-password"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="shrink-0"
+                                      aria-label={showPw ? "Hide password" : "Show password"}
+                                      onClick={() =>
+                                        setPasswordReveal((r) => ({
+                                          ...r,
+                                          [entry.id]: !r[entry.id],
+                                        }))
+                                      }
+                                    >
+                                      {showPw ? <EyeSlash size={18} /> : <Eye size={18} />}
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor={`pe-url-${entry.id}`} className="text-xs">
+                                    URL
+                                  </Label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      id={`pe-url-${entry.id}`}
+                                      type="url"
+                                      placeholder="https://…"
+                                      value={entry.url ?? ""}
+                                      onChange={(e) =>
+                                        patchPasswordEntry(entry.id, { url: e.target.value })
+                                      }
+                                      className="min-w-0 flex-1"
+                                      autoComplete="off"
+                                    />
+                                    {openHref ? (
+                                      <a
+                                        href={openHref}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="Open link"
+                                        className={cn(
+                                          buttonVariants({ variant: "outline", size: "icon" }),
+                                          "shrink-0"
+                                        )}
+                                      >
+                                        <ArrowSquareOut size={18} />
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </Card>
         </div>
       </div>
