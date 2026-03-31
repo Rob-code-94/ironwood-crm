@@ -34,7 +34,7 @@ export type WorkspaceSnapshotV1 = {
 
 /** Client-only: enable loading/saving workspace via /api/workspace/snapshot and IRONWOOD_WORKSPACE_FILE. */
 export function isWorkspaceFileSyncEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_IRONWOOD_WORKSPACE_SYNC === "1"
+  return process.env.NEXT_PUBLIC_IRONWOOD_WORKSPACE_SYNC !== "0"
 }
 
 export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 | null {

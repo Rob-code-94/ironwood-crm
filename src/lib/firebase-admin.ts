@@ -28,14 +28,20 @@ export function getFirebaseAdminFirestore() {
   }
 
   const serviceAccount = readServiceAccountFromEnv()
-  if (!serviceAccount) {
-    return null
+  if (serviceAccount) {
+    const app = initializeApp({
+      credential: cert(serviceAccount),
+      projectId: serviceAccount.projectId,
+    })
+
+    return getFirestore(app)
   }
 
-  const app = initializeApp({
-    credential: cert(serviceAccount),
-    projectId: serviceAccount.projectId,
-  })
-
-  return getFirestore(app)
+  // Cloud Run / GCP environments can use Application Default Credentials.
+  try {
+    const app = initializeApp()
+    return getFirestore(app)
+  } catch {
+    return null
+  }
 }

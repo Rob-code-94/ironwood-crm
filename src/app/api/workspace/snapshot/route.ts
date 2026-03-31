@@ -1,10 +1,16 @@
 import fs from "node:fs/promises"
 import { NextResponse } from "next/server"
+import { getFirebaseAdminFirestore } from "@/lib/firebase-admin"
 import { normalizeWorkspaceSnapshot } from "@/lib/workspace/persist"
 
 export const runtime = "nodejs"
 
+const WORKSPACE_COLLECTION = "workspaceSnapshots"
+const WORKSPACE_DOC_ID = "default"
+
 function syncAllowed(): boolean {
+  // Allow sync in production when Firestore is configured.
+  if (getFirebaseAdminFirestore()) return true
   return (
     process.env.NODE_ENV === "development" ||
     process.env.IRONWOOD_WORKSPACE_ALLOW_PRODUCTION === "true"
@@ -35,6 +41,23 @@ export async function GET() {
     )
   }
   const filePath = workspaceFilePath()
+  const db = getFirebaseAdminFirestore()
+
+  if (db) {
+    try {
+      const doc = await db.collection(WORKSPACE_COLLECTION).doc(WORKSPACE_DOC_ID).get()
+      if (doc.exists) {
+        const parsed = normalizeWorkspaceSnapshot(doc.data() as unknown)
+        if (!parsed) {
+          return NextResponse.json({ error: "Invalid Firestore workspace snapshot." }, { status: 422 })
+        }
+        return NextResponse.json(parsed)
+      }
+    } catch {
+      // Fall through to file-based sync so local dev remains usable while Firestore is provisioning.
+    }
+  }
+
   if (!filePath) {
     return NextResponse.json(
       {
@@ -72,15 +95,7 @@ export async function PUT(req: Request) {
     )
   }
   const filePath = workspaceFilePath()
-  if (!filePath) {
-    return NextResponse.json(
-      {
-        error:
-          "Set IRONWOOD_WORKSPACE_FILE to an absolute path in .env.local (e.g. /Users/you/.ironwood-workspace.json).",
-      },
-      { status: 503 }
-    )
-  }
+  const db = getFirebaseAdminFirestore()
 
   let body: unknown
   try {
@@ -97,6 +112,25 @@ export async function PUT(req: Request) {
   const withTime: typeof parsed = {
     ...parsed,
     persistedAt: typeof parsed.persistedAt === "number" ? parsed.persistedAt : Date.now(),
+  }
+
+  if (db) {
+    try {
+      await db.collection(WORKSPACE_COLLECTION).doc(WORKSPACE_DOC_ID).set(withTime)
+      return NextResponse.json({ ok: true })
+    } catch {
+      // Fall through to file-based snapshot write in environments where Firestore is not ready.
+    }
+  }
+
+  if (!filePath) {
+    return NextResponse.json(
+      {
+        error:
+          "Set IRONWOOD_WORKSPACE_FILE to an absolute path in .env.local (e.g. /Users/you/.ironwood-workspace.json).",
+      },
+      { status: 503 }
+    )
   }
 
   const dir = parentDirectory(filePath)
