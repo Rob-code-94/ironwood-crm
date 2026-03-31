@@ -39,7 +39,12 @@ export function getFirebaseAdminFirestore() {
 
   // Cloud Run / GCP environments can use Application Default Credentials.
   try {
-    const app = initializeApp()
+    const projectId =
+      process.env.GOOGLE_CLOUD_PROJECT ??
+      process.env.GCLOUD_PROJECT ??
+      process.env.GCP_PROJECT ??
+      process.env.FIREBASE_PROJECT_ID
+    const app = initializeApp(projectId ? { projectId } : undefined)
     return getFirestore(app)
   } catch {
     return null
