@@ -6,9 +6,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
+  type SetStateAction,
 } from "react"
+import { toast } from "sonner"
 import type {
   CalendarEvent,
   Company,
@@ -38,6 +41,8 @@ import {
   saveWorkspaceSnapshot,
   type WorkspaceSnapshotV1,
 } from "@/lib/workspace/persist"
+import { repairMissingProjectsFromRefs } from "@/lib/workspace/repair-missing-projects"
+import { wouldDestructiveOverwriteReject } from "@/lib/workspace/workspace-snapshot-guards"
 import { isoDateAddDays, toIsoDateLocal } from "@/lib/due-date-utils"
 
 export const ALL_PROJECTS_FILTER = "all"
@@ -115,6 +120,10 @@ type WorkspaceContextValue = {
   projectNameById: (id: string | undefined) => string | undefined
   addDocument: (doc: Omit<Document, "id">) => Document
   deleteDocument: (id: string) => void
+  /** True while waiting for the first remote workspace load when cloud sync is enabled. */
+  workspaceRemoteLoading: boolean
+  /** Infer missing `Project` rows from task/document `projectId` refs (then persists). */
+  repairWorkspaceFromRefs: () => void
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -129,86 +138,219 @@ function defaultDueDate() {
   return d.toISOString().slice(0, 10)
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s) return s.projects
-    return [...seedProjects]
-  })
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s) return s.tasks
-    return [...seedTasks]
-  })
-  const [contacts, setContacts] = useState<Contact[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s) return s.contacts
-    return [...seedContacts]
-  })
-  const [companies, setCompanies] = useState<Company[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s) return s.companies
-    return [...seedCompanies]
-  })
-  const [deals, setDeals] = useState<Deal[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s) return s.deals
-    return [...seedDeals]
-  })
-  const [savedChatTurns, setSavedChatTurns] = useState<SavedChatTurn[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s && Array.isArray(s.savedChatTurns)) return s.savedChatTurns
-    return []
-  })
-  const [documents, setDocuments] = useState<Document[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s && Array.isArray(s.documents)) return s.documents
-    return []
-  })
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
-    const s = loadWorkspaceSnapshot()
-    if (s && Array.isArray(s.calendarEvents)) return s.calendarEvents
-    return []
-  })
-  const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<number | null>(
-    () => {
-      const s = loadWorkspaceSnapshot()
-      if (
-        s &&
-        typeof s.taskDefaultDueOffsetDays === "number" &&
-        Number.isFinite(s.taskDefaultDueOffsetDays) &&
-        s.taskDefaultDueOffsetDays >= 0 &&
-        s.taskDefaultDueOffsetDays <= 365
-      ) {
-        return s.taskDefaultDueOffsetDays
-      }
-      return null
-    }
+/** Matches server CAS (`persistedAtFromStoredRaw` in workspace-put-payload). */
+function serverVersionFromSnapshot(s: WorkspaceSnapshotV1): number | null {
+  if (typeof s.persistedAt === "number" && Number.isFinite(s.persistedAt)) return s.persistedAt
+  const has =
+    s.projects.length > 0 ||
+    s.tasks.length > 0 ||
+    s.contacts.length > 0 ||
+    s.companies.length > 0 ||
+    s.deals.length > 0 ||
+    (s.documents?.length ?? 0) > 0 ||
+    (s.calendarEvents?.length ?? 0) > 0 ||
+    (s.savedChatTurns?.length ?? 0) > 0
+  return has ? 0 : null
+}
+
+function readLocalWorkspaceOrSeed(): WorkspaceSnapshotV1 {
+  const s = loadWorkspaceSnapshot()
+  if (s) return s
+  return {
+    version: 1,
+    projects: [...seedProjects],
+    tasks: [...seedTasks],
+    contacts: [...seedContacts],
+    companies: [...seedCompanies],
+    deals: [...seedDeals],
+    selectedProjectFilterId: ALL_PROJECTS_FILTER,
+    savedChatTurns: [],
+    documents: [],
+    calendarEvents: [],
+    taskDefaultDueOffsetDays: null,
+    persistedAt: undefined,
+  }
+}
+
+function emptySyncWorkspace(): WorkspaceSnapshotV1 {
+  return {
+    version: 1,
+    projects: [],
+    tasks: [],
+    contacts: [],
+    companies: [],
+    deals: [],
+    selectedProjectFilterId: ALL_PROJECTS_FILTER,
+    savedChatTurns: [],
+    documents: [],
+    calendarEvents: [],
+    taskDefaultDueOffsetDays: null,
+    persistedAt: undefined,
+  }
+}
+
+function getInitialWorkspaceSnapshot(): WorkspaceSnapshotV1 {
+  if (typeof window === "undefined") {
+    return isWorkspaceFileSyncEnabled() ? emptySyncWorkspace() : readLocalWorkspaceOrSeed()
+  }
+  if (!isWorkspaceFileSyncEnabled()) return readLocalWorkspaceOrSeed()
+  return emptySyncWorkspace()
+}
+
+type WorkspaceStateSetters = {
+  setProjects: (v: SetStateAction<Project[]>) => void
+  setTasks: (v: SetStateAction<Task[]>) => void
+  setContacts: (v: SetStateAction<Contact[]>) => void
+  setCompanies: (v: SetStateAction<Company[]>) => void
+  setDeals: (v: SetStateAction<Deal[]>) => void
+  setSavedChatTurns: (v: SetStateAction<SavedChatTurn[]>) => void
+  setDocuments: (v: SetStateAction<Document[]>) => void
+  setCalendarEvents: (v: SetStateAction<CalendarEvent[]>) => void
+  setTaskDefaultDueOffsetDays: (v: SetStateAction<number | null>) => void
+  setSelectedProjectFilterId: (v: SetStateAction<string>) => void
+}
+
+function applySnapshotToSetters(
+  remote: WorkspaceSnapshotV1,
+  setters: WorkspaceStateSetters,
+  lastServerPersistedAtRef: { current: number | null },
+  lastServerSnapshotForGuardRef: { current: WorkspaceSnapshotV1 | null }
+) {
+  setters.setProjects(remote.projects)
+  setters.setTasks(remote.tasks)
+  setters.setContacts(remote.contacts)
+  setters.setCompanies(remote.companies)
+  setters.setDeals(remote.deals)
+  setters.setSavedChatTurns(Array.isArray(remote.savedChatTurns) ? remote.savedChatTurns : [])
+  setters.setDocuments(Array.isArray(remote.documents) ? remote.documents : [])
+  setters.setCalendarEvents(Array.isArray(remote.calendarEvents) ? remote.calendarEvents : [])
+  setters.setTaskDefaultDueOffsetDays(
+    typeof remote.taskDefaultDueOffsetDays === "number" &&
+      remote.taskDefaultDueOffsetDays >= 0 &&
+      remote.taskDefaultDueOffsetDays <= 365
+      ? remote.taskDefaultDueOffsetDays
+      : null
   )
-  const [selectedProjectFilterId, setSelectedProjectFilterId] = useState<string>(
-    () => loadWorkspaceSnapshot()?.selectedProjectFilterId ?? ALL_PROJECTS_FILTER
+  setters.setSelectedProjectFilterId(remote.selectedProjectFilterId)
+  lastServerPersistedAtRef.current = serverVersionFromSnapshot(remote)
+  lastServerSnapshotForGuardRef.current = remote
+}
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const [initialSnapshot] = useState(() => getInitialWorkspaceSnapshot())
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(
+    () => !isWorkspaceFileSyncEnabled()
+  )
+  const lastServerPersistedAtRef = useRef<number | null>(null)
+  const lastServerSnapshotForGuardRef = useRef<WorkspaceSnapshotV1 | null>(null)
+
+  const [projects, setProjects] = useState(initialSnapshot.projects)
+  const [tasks, setTasks] = useState(initialSnapshot.tasks)
+  const [contacts, setContacts] = useState(initialSnapshot.contacts)
+  const [companies, setCompanies] = useState(initialSnapshot.companies)
+  const [deals, setDeals] = useState(initialSnapshot.deals)
+  const [savedChatTurns, setSavedChatTurns] = useState(initialSnapshot.savedChatTurns)
+  const [documents, setDocuments] = useState(() => initialSnapshot.documents ?? [])
+  const [calendarEvents, setCalendarEvents] = useState(
+    () => initialSnapshot.calendarEvents ?? []
+  )
+  const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<
+    number | null
+  >(() => initialSnapshot.taskDefaultDueOffsetDays ?? null)
+  const [selectedProjectFilterId, setSelectedProjectFilterId] = useState(
+    () => initialSnapshot.selectedProjectFilterId
+  )
+
+  const workspaceSetters: WorkspaceStateSetters = useMemo(
+    () => ({
+      setProjects,
+      setTasks,
+      setContacts,
+      setCompanies,
+      setDeals,
+      setSavedChatTurns,
+      setDocuments,
+      setCalendarEvents,
+      setTaskDefaultDueOffsetDays,
+      setSelectedProjectFilterId,
+    }),
+    [
+      setProjects,
+      setTasks,
+      setContacts,
+      setCompanies,
+      setDeals,
+      setSavedChatTurns,
+      setDocuments,
+      setCalendarEvents,
+      setTaskDefaultDueOffsetDays,
+      setSelectedProjectFilterId,
+    ]
+  )
+
+  const applyRemoteSnapshot = useCallback(
+    (remote: WorkspaceSnapshotV1) => {
+      applySnapshotToSetters(
+        remote,
+        workspaceSetters,
+        lastServerPersistedAtRef,
+        lastServerSnapshotForGuardRef
+      )
+    },
+    [workspaceSetters]
   )
 
   useEffect(() => {
     if (!isWorkspaceFileSyncEnabled()) return
-    const localPersistedAt = loadWorkspaceSnapshot()?.persistedAt ?? 0
     let cancelled = false
+
     void (async () => {
       const res = await fetch("/api/workspace/snapshot")
       if (cancelled) return
-      if (res.status === 503 || res.status === 404) return
-      if (!res.ok) return
+
+      const finishWithLocalFallback = () => {
+        if (cancelled) return
+        const local = loadWorkspaceSnapshot()
+        if (local)
+          applySnapshotToSetters(
+            local,
+            workspaceSetters,
+            lastServerPersistedAtRef,
+            lastServerSnapshotForGuardRef
+          )
+        else {
+          lastServerPersistedAtRef.current = null
+          lastServerSnapshotForGuardRef.current = null
+        }
+        setWorkspaceHydrated(true)
+      }
+
+      if (res.status === 503 || res.status === 404) {
+        finishWithLocalFallback()
+        return
+      }
+      if (!res.ok) {
+        finishWithLocalFallback()
+        return
+      }
+
       let raw: unknown
       try {
         raw = await res.json()
       } catch {
+        finishWithLocalFallback()
         return
       }
+
       const remote = normalizeWorkspaceSnapshot(raw)
-      if (!remote || cancelled) return
-      const remoteT = remote.persistedAt ?? 0
-      if (remoteT < localPersistedAt) return
+      if (!remote) {
+        finishWithLocalFallback()
+        return
+      }
+
       const localSnap = loadWorkspaceSnapshot()
+      const localPersistedAt = localSnap?.persistedAt ?? 0
+      const remoteT = remote.persistedAt ?? 0
       const localHasData =
         (localSnap?.projects?.length ?? 0) > 0 ||
         (localSnap?.tasks?.length ?? 0) > 0 ||
@@ -221,42 +363,79 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         remote.contacts.length === 0 &&
         remote.companies.length === 0 &&
         remote.deals.length === 0
-      if (localHasData && remoteLooksEmpty && remoteT === 0) return
-      setProjects(remote.projects)
-      setTasks(remote.tasks)
-      setContacts(remote.contacts)
-      setCompanies(remote.companies)
-      setDeals(remote.deals)
-      setSavedChatTurns(
-        Array.isArray(remote.savedChatTurns) ? remote.savedChatTurns : []
-      )
-      // Merge so remote snapshot does not wipe documents added locally before the fetch completed.
-      setDocuments((prev) => {
-        const remoteDocs = Array.isArray(remote.documents) ? remote.documents : []
-        const remoteIds = new Set(remoteDocs.map((d) => d.id))
-        const merged = [...remoteDocs]
-        for (const d of prev) {
-          if (!remoteIds.has(d.id)) merged.push(d)
+
+      if (cancelled) return
+
+      if (remoteT < localPersistedAt && localSnap) {
+        applySnapshotToSetters(
+          localSnap,
+          workspaceSetters,
+          lastServerPersistedAtRef,
+          lastServerSnapshotForGuardRef
+        )
+        setWorkspaceHydrated(true)
+        return
+      }
+
+      if (localHasData && remoteLooksEmpty && localSnap) {
+        if (process.env.NODE_ENV === "development") {
+          console.info("[Ironwood workspace] Keeping local workspace; remote core data is empty.", {
+            localPersistedAt,
+            remoteT,
+          })
         }
-        return merged
-      })
-      setCalendarEvents(Array.isArray(remote.calendarEvents) ? remote.calendarEvents : [])
-      setTaskDefaultDueOffsetDays(
-        typeof remote.taskDefaultDueOffsetDays === "number" &&
-          remote.taskDefaultDueOffsetDays >= 0 &&
-          remote.taskDefaultDueOffsetDays <= 365
-          ? remote.taskDefaultDueOffsetDays
-          : null
+        applySnapshotToSetters(
+          localSnap,
+          workspaceSetters,
+          lastServerPersistedAtRef,
+          lastServerSnapshotForGuardRef
+        )
+        setWorkspaceHydrated(true)
+        return
+      }
+
+      if (process.env.NODE_ENV === "development") {
+        console.info("[Ironwood workspace] Applying remote snapshot.", {
+          remoteT,
+          localPersistedAt,
+          projects: remote.projects.length,
+          tasks: remote.tasks.length,
+        })
+      }
+
+      applySnapshotToSetters(
+        remote,
+        workspaceSetters,
+        lastServerPersistedAtRef,
+        lastServerSnapshotForGuardRef
       )
-      setSelectedProjectFilterId(remote.selectedProjectFilterId)
-      // Persist merged state via the debounced effect below (do not save `remote` alone).
+      setWorkspaceHydrated(true)
     })()
+
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [workspaceSetters])
+
+  const repairWorkspaceFromRefs = useCallback(() => {
+    setProjects((prev) => {
+      const next = repairMissingProjectsFromRefs(prev, tasks, documents)
+      if (next === prev) {
+        toast.info("No missing projects to restore from task or document links.")
+        return prev
+      }
+      toast.success(
+        `Restored ${next.length - prev.length} project(s) from task or document links. Save syncs to Firestore.`
+      )
+      return next
+    })
+  }, [tasks, documents])
+
+  const workspaceRemoteLoading = isWorkspaceFileSyncEnabled() && !workspaceHydrated
 
   useEffect(() => {
+    if (isWorkspaceFileSyncEnabled() && !workspaceHydrated) return
+
     const snapshot: WorkspaceSnapshotV1 = {
       version: 1,
       projects,
@@ -273,13 +452,72 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     const t = window.setTimeout(() => {
       saveWorkspaceSnapshot(snapshot)
-      if (isWorkspaceFileSyncEnabled()) {
-        void fetch("/api/workspace/snapshot", {
+      if (!isWorkspaceFileSyncEnabled()) return
+
+      void (async () => {
+        const basis = lastServerSnapshotForGuardRef.current
+        if (basis && wouldDestructiveOverwriteReject(basis, snapshot)) {
+          toast.error(
+            "Save skipped: this would remove most of your workspace. Refresh the page or check you are on the right account."
+          )
+          return
+        }
+
+        const res = await fetch("/api/workspace/snapshot", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(snapshot),
+          body: JSON.stringify({
+            expectedPersistedAt: lastServerPersistedAtRef.current,
+            snapshot,
+          }),
         })
-      }
+        if (res.status === 409) {
+          toast.info("Workspace was updated elsewhere. Loading the latest data…")
+          const g = await fetch("/api/workspace/snapshot")
+          if (!g.ok) return
+          try {
+            const raw = await g.json()
+            const latest = normalizeWorkspaceSnapshot(raw)
+            if (latest) applyRemoteSnapshot(latest)
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+        if (res.status === 422) {
+          let payload: { destructive?: boolean; error?: string } = {}
+          try {
+            payload = (await res.json()) as typeof payload
+          } catch {
+            /* ignore */
+          }
+          if (payload.destructive) {
+            toast.error(
+              payload.error ?? "Save blocked so your workspace data is not wiped by mistake."
+            )
+          } else if (payload.error) {
+            toast.error(payload.error)
+          }
+          const g = await fetch("/api/workspace/snapshot")
+          if (!g.ok) return
+          try {
+            const raw = await g.json()
+            const latest = normalizeWorkspaceSnapshot(raw)
+            if (latest) applyRemoteSnapshot(latest)
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+        if (res.ok) {
+          const persisted =
+            typeof snapshot.persistedAt === "number" && Number.isFinite(snapshot.persistedAt)
+              ? snapshot.persistedAt
+              : Date.now()
+          lastServerPersistedAtRef.current = persisted
+          lastServerSnapshotForGuardRef.current = { ...snapshot, persistedAt: persisted }
+        }
+      })()
     }, 400)
     return () => window.clearTimeout(t)
   }, [
@@ -293,6 +531,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     documents,
     calendarEvents,
     taskDefaultDueOffsetDays,
+    workspaceHydrated,
+    applyRemoteSnapshot,
   ])
 
   const projectNameById = useCallback(
@@ -592,6 +832,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       projectNameById,
       addDocument,
       deleteDocument,
+      workspaceRemoteLoading,
+      repairWorkspaceFromRefs,
     }),
     [
       projects,
@@ -604,6 +846,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       savedChatTurns,
       selectedProjectFilterId,
       taskDefaultDueOffsetDays,
+      workspaceRemoteLoading,
+      repairWorkspaceFromRefs,
       addProject,
       updateProject,
       deleteProject,
@@ -631,7 +875,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   return (
-    <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
+    <WorkspaceContext.Provider value={value}>
+      {children}
+      {workspaceRemoteLoading ? (
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-3 bg-background/90 backdrop-blur-sm">
+          <p className="text-muted-foreground text-sm">Loading workspace from server…</p>
+        </div>
+      ) : null}
+    </WorkspaceContext.Provider>
   )
 }
 

@@ -1,29 +1,34 @@
 import fs from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getFirebaseAdminFirestore } from "@/lib/firebase-admin"
-import { emptyWorkspaceSnapshot, normalizeWorkspaceSnapshot } from "@/lib/workspace/persist"
+import { normalizeWorkspaceSnapshot, type WorkspaceSnapshotV1 } from "@/lib/workspace/persist"
+import {
+  readWorkspaceSnapshotFromBackend,
+  type WorkspaceSnapshotReadDebug,
+  WORKSPACE_COLLECTION,
+  WORKSPACE_DOC_ID,
+  workspaceFilePathFromEnv,
+} from "@/lib/workspace/snapshot-server-read"
+import {
+  assertWorkspacePutCas,
+  parseWorkspacePutPayload,
+  persistedAtFromStoredRaw,
+  WorkspaceVersionConflictError,
+} from "@/lib/workspace/workspace-put-payload"
+import {
+  assertNotDestructiveWorkspaceOverwrite,
+  WorkspaceDestructiveOverwriteError,
+} from "@/lib/workspace/workspace-snapshot-guards"
+import { orphanTaskProjectIds } from "@/lib/workspace/workspace-snapshot-invariants"
 
 export const runtime = "nodejs"
 
-const WORKSPACE_COLLECTION = "workspaceSnapshots"
-const WORKSPACE_DOC_ID = "default"
-
 function syncAllowed(): boolean {
-  // Allow sync in production when Firestore is configured.
   if (getFirebaseAdminFirestore()) return true
   return (
     process.env.NODE_ENV === "development" ||
     process.env.IRONWOOD_WORKSPACE_ALLOW_PRODUCTION === "true"
   )
-}
-
-/** Require an absolute path so we never need path.resolve (keeps Turbopack NFT tracing calm). */
-function workspaceFilePath(): string | null {
-  const raw = process.env.IRONWOOD_WORKSPACE_FILE?.trim()
-  if (!raw) return null
-  if (raw.startsWith("/")) return raw
-  if (/^[A-Za-z]:[\\/]/.test(raw)) return raw
-  return null
 }
 
 function parentDirectory(filePath: string): string {
@@ -33,70 +38,59 @@ function parentDirectory(filePath: string): string {
   return normalized.slice(0, idx)
 }
 
+function attachSnapshotDebugHeaders(res: NextResponse, debug: WorkspaceSnapshotReadDebug) {
+  res.headers.set("X-Ironwood-Snapshot-Source", debug.source)
+  res.headers.set("X-Ironwood-Firestore-Configured", debug.firestoreConfigured ? "1" : "0")
+  res.headers.set(
+    "X-Ironwood-Firestore-Doc-Exists",
+    debug.firestoreDocExists === null ? "na" : debug.firestoreDocExists ? "1" : "0"
+  )
+  res.headers.set("X-Ironwood-Projects-Count", String(debug.counts.projects))
+  res.headers.set("X-Ironwood-Tasks-Count", String(debug.counts.tasks))
+  res.headers.set("X-Ironwood-Persisted-At", debug.persistedAt != null ? String(debug.persistedAt) : "")
+  if (debug.firestoreReadError) {
+    res.headers.set("X-Ironwood-Firestore-Read-Error", debug.firestoreReadError.slice(0, 200))
+  }
+}
+
 export async function GET() {
   if (!syncAllowed()) {
     return NextResponse.json(
-      { error: "Workspace file sync is only available in development (or set IRONWOOD_WORKSPACE_ALLOW_PRODUCTION=true)." },
-      { status: 503 }
-    )
-  }
-  const filePath = workspaceFilePath()
-  const db = getFirebaseAdminFirestore()
-
-  if (db) {
-    try {
-      const doc = await db.collection(WORKSPACE_COLLECTION).doc(WORKSPACE_DOC_ID).get()
-      if (doc.exists) {
-        const parsed = normalizeWorkspaceSnapshot(doc.data() as unknown)
-        if (!parsed) {
-          return NextResponse.json({ error: "Invalid Firestore workspace snapshot." }, { status: 422 })
-        }
-        return NextResponse.json(parsed)
-      }
-      // Firestore is live but no workspace doc yet — return empty snapshot so clients can sync (PUT will create it).
-      return NextResponse.json(emptyWorkspaceSnapshot())
-    } catch {
-      // Fall through to file-based sync so local dev remains usable while Firestore is provisioning.
-    }
-  }
-
-  if (!filePath) {
-    return NextResponse.json(
       {
         error:
-          "Set IRONWOOD_WORKSPACE_FILE to an absolute path in .env.local (e.g. /Users/you/.ironwood-workspace.json).",
+          "Workspace file sync is only available in development (or set IRONWOOD_WORKSPACE_ALLOW_PRODUCTION=true).",
       },
       { status: 503 }
     )
   }
 
-  try {
-    const raw = await fs.readFile(filePath, "utf8")
-    const parsed = normalizeWorkspaceSnapshot(JSON.parse(raw) as unknown)
-    if (!parsed) {
-      return NextResponse.json({ error: "Invalid workspace snapshot file." }, { status: 422 })
-    }
-    return NextResponse.json(parsed)
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException
-    if (err.code === "ENOENT") {
-      return new NextResponse(null, { status: 404 })
-    }
-    return NextResponse.json(
-      { error: err.message || "Could not read workspace file." },
-      { status: 500 }
-    )
+  const result = await readWorkspaceSnapshotFromBackend()
+  if (!result.ok) {
+    const res = NextResponse.json({ error: result.error }, { status: result.status })
+    attachSnapshotDebugHeaders(res, result.debug)
+    return res
   }
+
+  const res = NextResponse.json(result.snapshot)
+  attachSnapshotDebugHeaders(res, result.debug)
+  return res
+}
+
+function forceDowngrade(req: Request): boolean {
+  return req.headers.get("x-ironwood-workspace-force-downgrade") === "1"
 }
 
 export async function PUT(req: Request) {
   if (!syncAllowed()) {
     return NextResponse.json(
-      { error: "Workspace file sync is only available in development (or set IRONWOOD_WORKSPACE_ALLOW_PRODUCTION=true)." },
+      {
+        error:
+          "Workspace file sync is only available in development (or set IRONWOOD_WORKSPACE_ALLOW_PRODUCTION=true).",
+      },
       { status: 503 }
     )
   }
-  const filePath = workspaceFilePath()
+  const filePath = workspaceFilePathFromEnv()
   const db = getFirebaseAdminFirestore()
 
   let body: unknown
@@ -106,9 +100,32 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
   }
 
-  const parsed = normalizeWorkspaceSnapshot(body)
-  if (!parsed) {
+  const parsedWrap = parseWorkspacePutPayload(body)
+  if (!parsedWrap) {
     return NextResponse.json({ error: "Body is not a valid workspace snapshot." }, { status: 422 })
+  }
+
+  const { snapshot: parsed, expectedPersistedAt } = parsedWrap
+
+  const orphans = orphanTaskProjectIds(parsed)
+  if (
+    orphans.length > 0 &&
+    process.env.IRONWOOD_WORKSPACE_REJECT_ORPHAN_TASKS === "true"
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Snapshot has tasks referencing projects that are not in this workspace. Remove those links or add the projects first.",
+        orphanTaskProjectIds: orphans,
+      },
+      { status: 422 }
+    )
+  }
+  if (orphans.length > 0 && process.env.NODE_ENV === "development") {
+    console.warn(
+      "[Ironwood workspace] PUT snapshot has tasks with missing projects:",
+      orphans
+    )
   }
 
   const withTime: typeof parsed = {
@@ -116,12 +133,44 @@ export async function PUT(req: Request) {
     persistedAt: typeof parsed.persistedAt === "number" ? parsed.persistedAt : Date.now(),
   }
 
+  const force = forceDowngrade(req)
+
   if (db) {
     try {
-      await db.collection(WORKSPACE_COLLECTION).doc(WORKSPACE_DOC_ID).set(withTime)
+      await db.runTransaction(async (transaction) => {
+        const ref = db.collection(WORKSPACE_COLLECTION).doc(WORKSPACE_DOC_ID)
+        const doc = await transaction.get(ref)
+        const existingSnapshot = doc.exists
+          ? normalizeWorkspaceSnapshot(doc.data() as unknown)
+          : null
+        const serverVersion = doc.exists
+          ? persistedAtFromStoredRaw(doc.data() as unknown)
+          : null
+        assertWorkspacePutCas(expectedPersistedAt, serverVersion)
+        if (existingSnapshot) {
+          assertNotDestructiveWorkspaceOverwrite(existingSnapshot, withTime, force)
+        }
+        transaction.set(ref, withTime)
+      })
       return NextResponse.json({ ok: true })
-    } catch {
-      // Fall through to file-based snapshot write in environments where Firestore is not ready.
+    } catch (e) {
+      if (e instanceof WorkspaceVersionConflictError) {
+        return NextResponse.json(
+          {
+            error: e.message,
+            conflict: true,
+            serverPersistedAt: e.serverPersistedAt,
+          },
+          { status: 409 }
+        )
+      }
+      if (e instanceof WorkspaceDestructiveOverwriteError) {
+        return NextResponse.json(
+          { error: e.message, destructive: true },
+          { status: 422 }
+        )
+      }
+      // Fall through to file-based snapshot write
     }
   }
 
@@ -133,6 +182,39 @@ export async function PUT(req: Request) {
       },
       { status: 503 }
     )
+  }
+
+  let existingFileSnapshot: WorkspaceSnapshotV1 | null = null
+  try {
+    const raw = await fs.readFile(filePath, "utf8")
+    const body = JSON.parse(raw) as unknown
+    const parsedFile = normalizeWorkspaceSnapshot(body)
+    if (parsedFile) existingFileSnapshot = parsedFile
+    const fileVersion = persistedAtFromStoredRaw(body)
+    assertWorkspacePutCas(expectedPersistedAt, fileVersion)
+    if (existingFileSnapshot) {
+      assertNotDestructiveWorkspaceOverwrite(existingFileSnapshot, withTime, force)
+    }
+  } catch (e) {
+    if (e instanceof WorkspaceVersionConflictError) {
+      return NextResponse.json(
+        {
+          error: e.message,
+          conflict: true,
+          serverPersistedAt: e.serverPersistedAt,
+        },
+        { status: 409 }
+      )
+    }
+    if (e instanceof WorkspaceDestructiveOverwriteError) {
+      return NextResponse.json(
+        { error: e.message, destructive: true },
+        { status: 422 }
+      )
+    }
+    const err = e as NodeJS.ErrnoException
+    if (err.code !== "ENOENT") throw e
+    assertWorkspacePutCas(expectedPersistedAt, null)
   }
 
   const dir = parentDirectory(filePath)
