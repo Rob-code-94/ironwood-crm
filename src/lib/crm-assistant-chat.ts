@@ -757,6 +757,79 @@ export function useCrmChatModelAdapter(
           }
         }
 
+        // Auto-route: plain text with task/project intent → execute-command
+        if (
+          !hasPendingActions &&
+          !commandModeRef.current &&
+          wantsWorkFromSource(stripSlashAtMetadata(lastUserTextValue))
+        ) {
+          const plainCommand = truncateForCommand(
+            threadMessagesToApi(options.messages)
+              .map((m) => m.content)
+              .join("\n")
+          )
+          const activeAgentForPlain = getActiveAgent()
+          const plainModel = activeAgentForPlain ? activeAgentForPlain.model : getStoredCrmAiModel()
+          const plainHint = resolveCommandTypeHint(lastUserTextValue)
+          const plainRes = await fetch("/api/execute-command", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              command: stripSlashAtMetadata(plainCommand),
+              ...(plainHint ? { commandType: plainHint } : {}),
+              model: plainModel,
+              ...(projectsCatalog.length > 0 ? { projectsCatalog } : {}),
+            }),
+            signal: options.abortSignal,
+          })
+          const plainData = (await plainRes.json()) as ExecuteCommandClientPayload
+          const plainTasks = Array.isArray(plainData.tasks) ? plainData.tasks : []
+          const plainProjects = Array.isArray(plainData.projects) ? plainData.projects : []
+
+          if (plainData.success && (plainTasks.length || plainProjects.length)) {
+            pendingActionsRef.current = {
+              tasks: plainTasks,
+              projects: plainProjects,
+              message: typeof plainData.message === "string" ? plainData.message : undefined,
+            }
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: proposalConfirmLines(
+                    typeof plainData.message === "string" ? plainData.message : undefined,
+                    plainTasks,
+                    plainProjects
+                  ),
+                },
+              ],
+            }
+            return
+          }
+
+          if (!plainData.success) {
+            yield {
+              content: [
+                {
+                  type: "text",
+                  text: formatCommandReply({
+                    success: false,
+                    message: typeof plainData.message === "string" ? plainData.message : "Could not parse the command.",
+                    tasks: plainTasks,
+                    projects: plainProjects,
+                    modelOutputPreview:
+                      typeof plainData.modelOutputPreview === "string"
+                        ? plainData.modelOutputPreview
+                        : undefined,
+                  }),
+                },
+              ],
+            }
+            return
+          }
+          // If no tasks/projects returned but success, fall through to regular chat
+        }
+
         const messages = threadMessagesToApi(options.messages)
         if (messages.length === 0) {
           yield { content: [{ type: "text", text: "Nothing to send." }] }
