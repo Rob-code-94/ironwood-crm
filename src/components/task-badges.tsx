@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import type { Priority, TaskStatus } from "@/lib/types"
 
 export const priorityVariant: Record<
@@ -13,12 +14,19 @@ export const priorityVariant: Record<
 
 export const statusVariant: Record<
   TaskStatus,
-  "default" | "secondary" | "outline" | "destructive"
+  "default" | "secondary" | "outline" | "destructive" | "success" | "warning" | "info"
 > = {
   todo: "outline",
   "in-progress": "default",
-  review: "secondary",
-  done: "secondary",
+  review: "warning",
+  done: "success",
+}
+
+export const statusLabel: Record<TaskStatus, string> = {
+  todo: "To do",
+  "in-progress": "In progress",
+  review: "In review",
+  done: "Done",
 }
 
 export function TaskPriorityBadge({ priority }: { priority: Priority }) {
@@ -29,10 +37,18 @@ export function TaskPriorityBadge({ priority }: { priority: Priority }) {
   )
 }
 
-export function TaskStatusBadge({ status }: { status: TaskStatus }) {
+export function TaskStatusBadge({
+  status,
+  size = "default",
+  className,
+}: {
+  status: TaskStatus
+  size?: "default" | "sm"
+  className?: string
+}) {
   return (
-    <Badge variant={statusVariant[status]} className="capitalize">
-      {status.replace("-", " ")}
+    <Badge variant={statusVariant[status]} size={size} className={cn("shrink-0", className)}>
+      {statusLabel[status]}
     </Badge>
   )
 }

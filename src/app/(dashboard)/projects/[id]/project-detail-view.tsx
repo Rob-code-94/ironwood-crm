@@ -26,6 +26,16 @@ import {
 import { useWorkspace } from "@/lib/workspace/context"
 import { CreateTaskDialog } from "@/components/create-task-dialog"
 import { TaskDetailDialog } from "@/components/task-detail-dialog"
+import { ProjectPlaybookPanel } from "@/components/project-playbook-panel"
+import { PlaybookPdfDownload } from "@/components/playbook-pdf-download"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetPanel,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { TaskPriorityBadge } from "@/components/task-badges"
 import { TaskStatusSelect } from "@/components/task-status-select"
 import { ResourceLinks } from "@/components/resource-links"
@@ -129,6 +139,7 @@ export function ProjectDetailView() {
   const [editingPasswordEntryId, setEditingPasswordEntryId] = useState<string | null>(null)
   const [notesOpen, setNotesOpen] = useState(false)
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [tasksSheetOpen, setTasksSheetOpen] = useState(false)
   const docInputRef = useRef<HTMLInputElement>(null)
 
   const project = useMemo(() => projects.find((p) => p.id === id), [projects, id])
@@ -293,10 +304,10 @@ export function ProjectDetailView() {
           variant="outline"
           size="sm"
           className="shrink-0 gap-2"
-          render={<Link href={`/projects/${id}/playbook`} />}
+          onClick={() => setTasksSheetOpen(true)}
         >
-          <ListChecks size={16} />
-          Playbook
+          <CheckSquare size={16} />
+          Tasks
         </Button>
       </div>
 
@@ -313,83 +324,27 @@ export function ProjectDetailView() {
 
       <div className="grid min-w-0 gap-4 md:grid-cols-3">
         <Card className="min-w-0 overflow-hidden md:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2">
-              <CheckSquare size={18} />
-              Tasks
-            </CardTitle>
-            <Button size="sm" onClick={() => setTaskDialogOpen(true)}>
-              <Plus size={14} className="mr-1" />
-              Add Task
-            </Button>
+          <CardHeader className="flex flex-row items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2">
+                <ListChecks size={18} />
+                Playbook
+              </CardTitle>
+              <p className="text-xs text-muted-foreground font-normal mt-1">
+                {projectTasks.filter((t) => t.status === "done").length}/{projectTasks.length}{" "}
+                complete
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <PlaybookPdfDownload projectId={id} projectName={project.name} />
+              <Button size="sm" onClick={() => setTaskDialogOpen(true)}>
+                <Plus size={14} className="mr-1" />
+                Add Task
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="min-w-0">
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium">Task</th>
-                    <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Section</th>
-                    <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Priority</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {projectTasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground text-sm">
-                        No tasks yet for this project.
-                      </td>
-                    </tr>
-                  ) : (
-                    projectTasks.map((task, i) => (
-                      <tr
-                        key={task.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setDetailTaskId(task.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault()
-                            setDetailTaskId(task.id)
-                          }
-                        }}
-                        className={cn(
-                          i < projectTasks.length - 1 && "border-b",
-                          "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
-                        )}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{task.title}</div>
-                          <div className="mt-1" onClick={(e) => e.stopPropagation()}>
-                            <ResourceLinks links={task.links} compact />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs hidden lg:table-cell">
-                          {task.section?.trim() || "—"}
-                        </td>
-                        <td className="px-4 py-3 hidden sm:table-cell">
-                          <TaskPriorityBadge priority={task.priority} />
-                        </td>
-                        <td className="px-4 py-3 align-middle">
-                          <div onClick={(e) => e.stopPropagation()}>
-                            <TaskStatusSelect
-                              size="compact"
-                              value={task.status}
-                              onChange={(status) => updateTask(task.id, { status })}
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                          {task.dueDate ?? "—"}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ProjectPlaybookPanel projectId={id} />
           </CardContent>
         </Card>
 
@@ -816,6 +771,97 @@ export function ProjectDetailView() {
           </Card>
         </div>
       </div>
+
+      <Sheet open={tasksSheetOpen} onOpenChange={setTasksSheetOpen}>
+        <SheetContent
+          side="right"
+          className="flex h-full max-h-[100dvh] w-[min(100vw-1rem,56rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 p-0 sm:max-w-4xl"
+        >
+          <SheetHeader className="border-b px-6 py-4 text-left">
+            <SheetTitle className="flex items-center gap-2">
+              <CheckSquare size={20} />
+              Tasks
+            </SheetTitle>
+            <SheetDescription>
+              Table view for {project.name} — click a row for details.
+            </SheetDescription>
+          </SheetHeader>
+          <SheetPanel className="min-h-0 flex-1 px-6 py-4">
+            <div className="mb-4 flex justify-end">
+              <Button size="sm" onClick={() => setTaskDialogOpen(true)}>
+                <Plus size={14} className="mr-1" />
+                Add Task
+              </Button>
+            </div>
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium">Task</th>
+                    <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Section</th>
+                    <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Priority</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projectTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground text-sm">
+                        No tasks yet for this project.
+                      </td>
+                    </tr>
+                  ) : (
+                    projectTasks.map((task, i) => (
+                      <tr
+                        key={task.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setDetailTaskId(task.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            setDetailTaskId(task.id)
+                          }
+                        }}
+                        className={cn(
+                          i < projectTasks.length - 1 && "border-b",
+                          "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+                        )}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-medium">{task.title}</div>
+                          <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                            <ResourceLinks links={task.links} compact />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs hidden lg:table-cell">
+                          {task.section?.trim() || "—"}
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <TaskPriorityBadge priority={task.priority} />
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <TaskStatusSelect
+                              size="compact"
+                              value={task.status}
+                              onChange={(status) => updateTask(task.id, { status })}
+                            />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                          {task.dueDate ?? "—"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </SheetPanel>
+        </SheetContent>
+      </Sheet>
 
       <CreateTaskDialog
         open={taskDialogOpen}
