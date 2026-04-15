@@ -31,7 +31,7 @@ export function TaskStatusSelect({
 }: TaskStatusSelectProps) {
   const triggerClass =
     size === "compact"
-      ? "h-auto min-h-8 w-[min(100%,8.75rem)] max-w-[9rem] py-1.5 text-xs"
+      ? "h-7 w-auto min-w-[6.25rem] rounded-full border-border/70 bg-muted/40 px-2.5 py-0 text-xs"
       : "h-auto min-h-9 w-[min(100%,10rem)] max-w-[10rem] py-2"
 
   return (

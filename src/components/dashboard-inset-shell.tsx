@@ -41,7 +41,7 @@ export function DashboardInsetShell({
       <SidebarInset className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <TaskLineupBar />
-          <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4">
+          <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)]">
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger className="-ml-1 hidden md:inline-flex" />
               <MobileNav />
@@ -59,7 +59,9 @@ export function DashboardInsetShell({
             </div>
           </header>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+            <div className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom,0px)]">
+              {children}
+            </div>
           </div>
         </div>
       </SidebarInset>

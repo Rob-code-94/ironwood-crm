@@ -4,6 +4,13 @@ import { useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Plus, Trash } from "@phosphor-icons/react/dist/ssr"
 import type { Task, TaskStatus } from "@/lib/types"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
@@ -17,6 +24,12 @@ const COLUMN_ORDER: { id: TaskStatus; title: string; color: string }[] = [
   { id: "review", title: "Review", color: "bg-yellow-100" },
   { id: "done", title: "Done", color: "bg-green-100" },
 ]
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "To Do",
+  "in-progress": "In Progress",
+  review: "Review",
+  done: "Done",
+}
 
 export function KanbanBoard() {
   const {
@@ -71,11 +84,11 @@ export function KanbanBoard() {
 
   return (
     <>
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-4">
         {columns.map((column) => (
           <div
             key={column.id}
-            className="flex-shrink-0 w-80 bg-muted/30 rounded-lg p-4"
+            className="w-[17.5rem] flex-shrink-0 rounded-lg bg-muted/30 p-4 sm:w-80"
           >
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -110,6 +123,7 @@ export function KanbanBoard() {
                   columnStatus={column.id}
                   onDragStart={handleDragStart}
                   onDelete={() => deleteTask(task.id)}
+                  onMoveTask={moveTaskToStatus}
                 />
               ))}
             </div>
@@ -131,15 +145,17 @@ function KanbanTaskCard({
   columnStatus,
   onDragStart,
   onDelete,
+  onMoveTask,
 }: {
   task: Task
   columnStatus: TaskStatus
   onDragStart: (e: React.DragEvent, taskId: string, sourceStatus: TaskStatus) => void
   onDelete: () => void
+  onMoveTask: (taskId: string, status: TaskStatus) => void
 }) {
   return (
     <Card
-      className="cursor-move hover:shadow-md transition-shadow bg-card"
+      className="cursor-grab bg-card transition-shadow hover:shadow-md active:cursor-grabbing"
       draggable
       onDragStart={(e) => onDragStart(e, task.id, columnStatus)}
     >
@@ -174,6 +190,18 @@ function KanbanTaskCard({
           >
             {task.priority}
           </Badge>
+          <Select value={task.status} onValueChange={(value) => onMoveTask(task.id, value as TaskStatus)}>
+            <SelectTrigger className="h-7 w-[7.5rem] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLUMN_ORDER.map((column) => (
+                <SelectItem key={column.id} value={column.id} className="text-xs">
+                  {STATUS_LABEL[column.id]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {task.assignee && (

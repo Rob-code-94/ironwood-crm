@@ -6,23 +6,38 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Bell, ClockCountdown, X, CheckCircle, PushPin } from "@phosphor-icons/react/dist/ssr"
 import { useWorkspace } from "@/lib/workspace/context"
+import { cn } from "@/lib/utils"
 
-export function NotificationsPanel() {
+export function NotificationsPanel({
+  className,
+  embedInCard = true,
+}: {
+  className?: string
+  embedInCard?: boolean
+}) {
   const {
     notifications,
+    tasks,
     markNotificationRead,
     dismissNotification,
     clearNotifications,
     snoozeNotification,
     pinTaskToLineup,
   } = useWorkspace()
+  const visibleNotifications = useMemo(() => {
+    const doneTaskIds = new Set(tasks.filter((task) => task.status === "done").map((task) => task.id))
+    return notifications.filter(
+      (notification) =>
+        !(notification.sourceType === "task" && doneTaskIds.has(notification.sourceId))
+    )
+  }, [notifications, tasks])
   const unreadCount = useMemo(
-    () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),
-    [notifications]
+    () => visibleNotifications.reduce((count, notification) => count + (notification.read ? 0 : 1), 0),
+    [visibleNotifications]
   )
 
-  return (
-    <Card className="w-full max-w-md">
+  const content = (
+    <>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -34,7 +49,7 @@ export function NotificationsPanel() {
               </Badge>
             )}
           </div>
-          {notifications.length > 0 && (
+          {visibleNotifications.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
@@ -47,9 +62,9 @@ export function NotificationsPanel() {
         </div>
       </CardHeader>
       <CardContent>
-        {notifications.length > 0 ? (
+        {visibleNotifications.length > 0 ? (
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
-            {notifications.map((notification) => {
+            {visibleNotifications.map((notification) => {
               return (
                 <div
                   key={notification.id}
@@ -124,6 +139,16 @@ export function NotificationsPanel() {
           </div>
         )}
       </CardContent>
+    </>
+  )
+
+  if (!embedInCard) {
+    return <div className={cn("w-full", className)}>{content}</div>
+  }
+
+  return (
+    <Card className={cn("w-full max-w-md", className)}>
+      {content}
     </Card>
   )
 }

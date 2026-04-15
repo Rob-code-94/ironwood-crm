@@ -14,7 +14,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, MagnifyingGlass, Funnel, Trash, PushPin } from "@phosphor-icons/react/dist/ssr"
+import {
+  Plus,
+  MagnifyingGlass,
+  Funnel,
+  Trash,
+  PushPin,
+  ArrowsDownUp,
+  CaretUp,
+  CaretDown,
+} from "@phosphor-icons/react/dist/ssr"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 import { CreateTaskDialog } from "@/components/create-task-dialog"
 import { TaskDetailDialog } from "@/components/task-detail-dialog"
@@ -87,7 +96,13 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all")
   const [hideDone, setHideDone] = useState(false)
   const [sortKey, setSortKey] = useState<
-    "due-asc" | "due-desc" | "created-desc" | "priority-desc" | "project-asc" | "title-asc"
+    | "due-asc"
+    | "due-desc"
+    | "created-desc"
+    | "priority-desc"
+    | "project-asc"
+    | "status-asc"
+    | "title-asc"
   >("due-asc")
 
   const detailTask = useMemo(
@@ -155,6 +170,7 @@ export default function TasksPage() {
         sort === "created-desc" ||
         sort === "priority-desc" ||
         sort === "project-asc" ||
+        sort === "status-asc" ||
         sort === "title-asc"
       ) {
         setSortKey(sort)
@@ -225,6 +241,17 @@ export default function TasksPage() {
           if (pc !== 0) return pc
           return cmpText(a.title, b.title)
         }
+        case "status-asc": {
+          const statusOrder: Record<TaskStatus, number> = {
+            todo: 0,
+            "in-progress": 1,
+            review: 2,
+            done: 3,
+          }
+          const sc = statusOrder[a.status] - statusOrder[b.status]
+          if (sc !== 0) return sc
+          return cmpDue(a.dueDate, b.dueDate)
+        }
         case "title-asc":
           return cmpText(a.title, b.title)
         case "due-asc":
@@ -265,9 +292,14 @@ export default function TasksPage() {
       .length,
   }
 
+  const sortIcon = (active: boolean, descending = false) => {
+    if (!active) return <ArrowsDownUp size={13} className="text-muted-foreground/70" />
+    return descending ? <CaretDown size={13} className="text-foreground" /> : <CaretUp size={13} className="text-foreground" />
+  }
+
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
           <p className="text-muted-foreground mt-1">Manage and track all your tasks</p>
@@ -283,14 +315,14 @@ export default function TasksPage() {
             </p>
           )}
         </div>
-        <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+        <Button className="w-full gap-2 sm:w-auto" onClick={() => setCreateOpen(true)}>
           <Plus size={16} />
           New Task
         </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4 max-w-md">
+        <TabsList className="sticky top-0 z-20 grid w-full grid-cols-2 gap-1 rounded-lg bg-background/95 py-1 backdrop-blur sm:max-w-md sm:grid-cols-4">
           <TabsTrigger value="all">
             All
             <Badge variant="secondary" className="ml-2">
@@ -318,121 +350,106 @@ export default function TasksPage() {
         </TabsList>
 
         <TabsContent value={activeTab} className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Project</Label>
-              <Select
-                value={pageProjectFilterId}
-                onValueChange={(v) => {
-                  if (v == null) return
-                  setPageProjectFilterId(v)
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All projects" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_PROJECTS_FILTER}>All projects</SelectItem>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Status</Label>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) => {
-                  if (v == null) return
-                  setStatusFilter(v as typeof statusFilter)
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="todo">To do</SelectItem>
-                  <SelectItem value="in-progress">In progress</SelectItem>
-                  <SelectItem value="review">Review</SelectItem>
-                  <SelectItem value="done">Done</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Sort</Label>
-              <Select
-                value={sortKey}
-                onValueChange={(v) => {
-                  if (v == null) return
-                  setSortKey(v as typeof sortKey)
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="due-asc">Due date (soonest)</SelectItem>
-                  <SelectItem value="due-desc">Due date (latest)</SelectItem>
-                  <SelectItem value="created-desc">Recently created</SelectItem>
-                  <SelectItem value="priority-desc">Priority (highest first)</SelectItem>
-                  <SelectItem value="project-asc">Project (A–Z)</SelectItem>
-                  <SelectItem value="title-asc">Title (A–Z)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-end gap-2 pb-1">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="hide-done"
-                  checked={hideDone}
-                  onCheckedChange={(checked) => setHideDone(checked === true)}
-                />
-                <Label htmlFor="hide-done" className="text-xs text-muted-foreground">
-                  Hide done
-                </Label>
+          <div className="sticky top-12 z-20 space-y-4 rounded-lg border bg-background/95 p-3 backdrop-blur">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Project</Label>
+                <Select
+                  value={pageProjectFilterId}
+                  onValueChange={(v) => {
+                    if (v == null) return
+                    setPageProjectFilterId(v)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All projects" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_PROJECTS_FILTER}>All projects</SelectItem>
+                    {projects.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Status</Label>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => {
+                    if (v == null) return
+                    setStatusFilter(v as typeof statusFilter)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="todo">To do</SelectItem>
+                    <SelectItem value="in-progress">In progress</SelectItem>
+                    <SelectItem value="review">Review</SelectItem>
+                    <SelectItem value="done">Done</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end gap-2 pb-1">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="hide-done"
+                    checked={hideDone}
+                    onCheckedChange={(checked) => setHideDone(checked === true)}
+                  />
+                  <Label htmlFor="hide-done" className="text-xs text-muted-foreground">
+                    Hide done
+                  </Label>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <MagnifyingGlass
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                placeholder="Search tasks..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <MagnifyingGlass
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  placeholder="Search tasks..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <Select
+                value={filterPriority}
+                onValueChange={(v) => {
+                  if (v != null) setFilterPriority(v as typeof filterPriority)
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-40">
+                  <Funnel size={16} className="mr-2" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Priorities</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full shrink-0 gap-2 sm:w-auto"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={16} />
+                Add task
+              </Button>
             </div>
-            <Select
-              value={filterPriority}
-              onValueChange={(v) => {
-                if (v != null) setFilterPriority(v as typeof filterPriority)
-              }}
-            >
-              <SelectTrigger className="w-32">
-                <Funnel size={16} className="mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => setCreateOpen(true)}>
-              <Plus size={16} />
-              Add task
-            </Button>
           </div>
 
           {selectedIds.size > 0 && (
@@ -527,8 +544,8 @@ export default function TasksPage() {
           <Card>
             <CardContent className="pt-6">
               {filteredTasks.length > 0 ? (
-                <div className="rounded-md border">
-                  <table className="w-full text-sm">
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full min-w-[56rem] text-sm">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="w-10 px-2 py-3">
@@ -546,11 +563,51 @@ export default function TasksPage() {
                           />
                         </th>
                         <th className="px-4 py-3 text-left font-medium">Task</th>
-                        <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Project</th>
+                        <th className="px-4 py-3 text-left font-medium hidden md:table-cell">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 hover:text-foreground text-muted-foreground"
+                            onClick={() => setSortKey("project-asc")}
+                          >
+                            <span>Project</span>
+                            {sortIcon(sortKey === "project-asc")}
+                          </button>
+                        </th>
                         <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Links</th>
-                        <th className="px-4 py-3 text-left font-medium hidden lg:table-cell min-w-[9rem]">Priority</th>
-                        <th className="px-4 py-3 text-left font-medium min-w-[8.25rem]">Status</th>
-                        <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
+                        <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 hover:text-foreground text-muted-foreground"
+                            onClick={() => setSortKey("priority-desc")}
+                          >
+                            <span>Priority</span>
+                            {sortIcon(sortKey === "priority-desc", true)}
+                          </button>
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 hover:text-foreground text-muted-foreground"
+                            onClick={() => setSortKey("status-asc")}
+                          >
+                            <span>Status</span>
+                            {sortIcon(sortKey === "status-asc")}
+                          </button>
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium hidden md:table-cell">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 hover:text-foreground text-muted-foreground"
+                            onClick={() =>
+                              setSortKey((current) =>
+                                current === "due-asc" ? "due-desc" : "due-asc"
+                              )
+                            }
+                          >
+                            <span>Due</span>
+                            {sortIcon(sortKey === "due-asc" || sortKey === "due-desc", sortKey === "due-desc")}
+                          </button>
+                        </th>
                         <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Reminder</th>
                         <th className="px-4 py-3 text-right font-medium w-[1%]">Actions</th>
                       </tr>
@@ -585,6 +642,11 @@ export default function TasksPage() {
                               {task.title}
                             </button>
                             <ResourceLinks links={task.links} compact className="mt-1 md:hidden" />
+                            <div className="mt-2 space-y-1 text-xs text-muted-foreground md:hidden">
+                              <p>Project: {task.projectName ?? "—"}</p>
+                              <p className="capitalize">Priority: {task.priority}</p>
+                              <p>Due: {task.dueDate ?? "—"}</p>
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                             {task.projectName ?? "—"}
@@ -599,7 +661,7 @@ export default function TasksPage() {
                                 if (v != null) updateTask(task.id, { priority: v as Priority })
                               }}
                             >
-                              <SelectTrigger className="h-8 w-[8.5rem] text-xs capitalize">
+                              <SelectTrigger className="h-7 w-auto min-w-[6.5rem] rounded-full border-border/70 bg-muted/40 px-2.5 py-0 text-xs capitalize">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -614,7 +676,6 @@ export default function TasksPage() {
                           <td className="px-4 py-2 align-middle">
                             <TaskStatusSelect
                               size="compact"
-                              className="w-[8rem] max-w-[8rem]"
                               value={task.status}
                               onChange={(status) => updateTask(task.id, { status })}
                             />

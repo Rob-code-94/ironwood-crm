@@ -7,7 +7,7 @@ import { GridFour, Users } from "@phosphor-icons/react/dist/ssr"
 
 export default function TaskBoardPage() {
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Task Board</h1>
@@ -16,14 +16,16 @@ export default function TaskBoardPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="kanban" className="w-full">
-        <TabsList>
+        <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="kanban" className="flex items-center gap-2">
             <GridFour size={16} />
-            Kanban Board
+            <span className="hidden sm:inline">Kanban Board</span>
+            <span className="sm:hidden">Kanban</span>
           </TabsTrigger>
           <TabsTrigger value="team" className="flex items-center gap-2">
             <Users size={16} />
-            Team Collaboration
+            <span className="hidden sm:inline">Team Collaboration</span>
+            <span className="sm:hidden">Team</span>
           </TabsTrigger>
         </TabsList>
 

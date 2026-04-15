@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 export const AssistantModal: FC = () => {
   return (
     <AssistantModalPrimitive.Root>
-      <AssistantModalPrimitive.Anchor className="fixed bottom-4 right-4 z-50 size-11">
+      <AssistantModalPrimitive.Anchor className="fixed z-50 size-11 [bottom:calc(env(safe-area-inset-bottom,0px)+1rem)] [right:calc(env(safe-area-inset-right,0px)+1rem)]">
         <AssistantModalPrimitive.Trigger asChild>
           <AssistantModalButton />
         </AssistantModalPrimitive.Trigger>

@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google"
 import { ThemeProvider } from "@/components/theme-provider"
 // TODO: Fix tw-animate-css import - Next.js server components need different approach
@@ -20,6 +20,21 @@ const fontMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Ironwood Planner - CRM & SaaS Dashboard",
   description: "All-in-one CRM and SaaS platform for project management, task tracking, and team collaboration",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon",
+    apple: "/apple-icon",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Ironwood Planner",
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

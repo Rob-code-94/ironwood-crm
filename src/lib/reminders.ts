@@ -47,6 +47,14 @@ function notificationMessage(source: ReminderSource, minutesBefore: number): str
   return `Event starts in ${leadLabel(minutesBefore)} (${source.date}).`
 }
 
+function toIcsStamp(date = new Date()) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")
+}
+
+function cleanIcsText(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll(",", "\\,").replaceAll(";", "\\;")
+}
+
 export function defaultReminderConfig(minutesBefore: number): ReminderConfig[] {
   return [
     {
@@ -59,7 +67,7 @@ export function defaultReminderConfig(minutesBefore: number): ReminderConfig[] {
 
 export function deriveReminderSources(tasks: Task[], events: CalendarEvent[]): ReminderSource[] {
   const taskRows: ReminderSource[] = tasks
-    .filter((task) => Boolean(task.dueDate))
+    .filter((task) => Boolean(task.dueDate) && task.status !== "done")
     .map((task) => ({
       sourceType: "task" as const,
       sourceId: task.id,
@@ -177,7 +185,7 @@ export function buildIcsFileContent(input: {
   date: string
   time?: string
 }) {
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")
+  const stamp = toIcsStamp()
   const dtStart = input.time
     ? `${input.date.replaceAll("-", "")}T${input.time.replace(":", "")}00`
     : input.date.replaceAll("-", "")
@@ -193,10 +201,58 @@ export function buildIcsFileContent(input: {
     `DTSTAMP:${stamp}`,
     `DTSTART:${dtStart}`,
     `DTEND:${dtEnd}`,
-    `SUMMARY:${input.title.replaceAll("\n", " ")}`,
-    `DESCRIPTION:${(input.description ?? "").replaceAll("\n", "\\n")}`,
+    `SUMMARY:${cleanIcsText(input.title)}`,
+    `DESCRIPTION:${cleanIcsText(input.description ?? "")}`,
     "END:VEVENT",
     "END:VCALENDAR",
     "",
   ].join("\r\n")
+}
+
+export function buildWorkspaceIcsFeed(input: {
+  tasks: Task[]
+  events: CalendarEvent[]
+  host?: string
+}) {
+  const stamp = toIcsStamp()
+  const host = (input.host?.trim() || "ironwood.local").replace(/^https?:\/\//, "")
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ironwood Planner//EN"]
+
+  for (const task of input.tasks) {
+    if (!task.dueDate) continue
+    const date = task.dueDate.replaceAll("-", "")
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:ironwood-task-${task.id}@${host}`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${date}`,
+      `DTEND;VALUE=DATE:${date}`,
+      `SUMMARY:${cleanIcsText(task.title)}`,
+      `DESCRIPTION:${cleanIcsText(task.projectName ? `Task · ${task.projectName}` : "Workspace task")}`,
+      "END:VEVENT"
+    )
+  }
+
+  for (const event of input.events) {
+    const date = event.date.replaceAll("-", "")
+    const dtStart = event.time
+      ? `${date}T${event.time.replace(":", "")}00`
+      : date
+    const dtEnd = event.time
+      ? `${date}T${event.time.replace(":", "")}59`
+      : date
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:ironwood-event-${event.id}@${host}`,
+      `DTSTAMP:${stamp}`,
+      event.time ? `DTSTART:${dtStart}` : `DTSTART;VALUE=DATE:${dtStart}`,
+      event.time ? `DTEND:${dtEnd}` : `DTEND;VALUE=DATE:${dtEnd}`,
+      `SUMMARY:${cleanIcsText(event.title)}`,
+      `DESCRIPTION:${cleanIcsText(event.description ?? "Workspace calendar event")}`,
+      "END:VEVENT"
+    )
+  }
+
+  lines.push("END:VCALENDAR", "")
+  return lines.join("\r\n")
 }

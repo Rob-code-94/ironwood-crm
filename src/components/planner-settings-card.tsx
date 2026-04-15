@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import {
@@ -14,6 +14,13 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/lib/workspace/context"
 import { CalendarBlank } from "@phosphor-icons/react/dist/ssr"
+import { toast } from "sonner"
+import {
+  ensureNotificationPermission,
+  ensurePushSubscription,
+  registerReminderServiceWorker,
+  removePushSubscription,
+} from "@/lib/notifications/push-client"
 
 const PRESETS: { value: string; label: string }[] = [
   { value: "none", label: "No default" },
@@ -64,6 +71,7 @@ export function PlannerSettingsCard() {
           (YYYY-MM-DD). Event times are for your reference only; they are not pushed to Google
           Calendar or other services.
         </p>
+        <CalendarFeedCard />
         <div className="space-y-2 max-w-sm">
           <Label htmlFor="default-due-offset">Default due date when creating a task</Label>
           <Select
@@ -108,7 +116,19 @@ export function PlannerSettingsCard() {
             </div>
             <Switch
               checked={notificationPreferences.pushEnabled}
-              onCheckedChange={(checked) => updateNotificationPreferences({ pushEnabled: checked })}
+              onCheckedChange={(checked) => {
+                updateNotificationPreferences({ pushEnabled: checked })
+                if (!checked) {
+                  void removePushSubscription()
+                  return
+                }
+                void (async () => {
+                  const subscribed = await ensurePushSubscription()
+                  if (!subscribed) {
+                    updateNotificationPreferences({ pushEnabled: false })
+                  }
+                })()
+              }}
             />
           </div>
           <div className="flex flex-wrap gap-2">
@@ -117,8 +137,7 @@ export function PlannerSettingsCard() {
               variant="outline"
               size="sm"
               onClick={async () => {
-                if (!("Notification" in window)) return
-                await Notification.requestPermission()
+                await ensureNotificationPermission()
               }}
             >
               Enable permission
@@ -128,8 +147,8 @@ export function PlannerSettingsCard() {
               variant="outline"
               size="sm"
               onClick={async () => {
-                if (!("serviceWorker" in navigator)) return
-                await navigator.serviceWorker.register("/reminder-sw.js")
+                await registerReminderServiceWorker()
+                await ensurePushSubscription()
               }}
             >
               Register worker
@@ -138,5 +157,39 @@ export function PlannerSettingsCard() {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function CalendarFeedCard() {
+  const feedUrl = useMemo(() => {
+    if (typeof window === "undefined") return ""
+    const token = process.env.NEXT_PUBLIC_IRONWOOD_CALENDAR_FEED_TOKEN?.trim()
+    if (!token) return ""
+    return `${window.location.origin}/api/calendar/feed.ics?token=${encodeURIComponent(token)}`
+  }, [])
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+      <p className="text-sm font-medium">iOS Calendar subscription</p>
+      <p className="text-xs text-muted-foreground">
+        Add this feed URL in iOS Calendar (Add Calendar Subscription) for read-only sync.
+      </p>
+      <div className="rounded border bg-background px-3 py-2 text-xs break-all">
+        {feedUrl || "Set NEXT_PUBLIC_IRONWOOD_CALENDAR_FEED_TOKEN and IRONWOOD_CALENDAR_FEED_TOKEN to enable feed URL."}
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!feedUrl}
+        onClick={async () => {
+          if (!feedUrl) return
+          await navigator.clipboard.writeText(feedUrl)
+          toast.success("Calendar feed URL copied")
+        }}
+      >
+        Copy subscription URL
+      </Button>
+    </div>
   )
 }

@@ -29,6 +29,7 @@ type CalEvent = {
   title: string
   date: Date
   time: string
+  rawTime?: string
   status: string
   description?: string
 }
@@ -89,6 +90,7 @@ export default function CalendarPage() {
         title: t.title,
         date: new Date(`${t.dueDate}T12:00:00`),
         time: "Due date",
+        rawTime: undefined,
         status:
           t.priority === "urgent"
             ? "urgent"
@@ -107,6 +109,7 @@ export default function CalendarPage() {
       title: e.title,
       date: new Date(`${e.date}T12:00:00`),
       time: formatCalendarTimeLabel(e.time),
+      rawTime: e.time,
       status: "event",
       description: e.description,
     }))
@@ -150,7 +153,7 @@ export default function CalendarPage() {
       title: event.title,
       description: event.description,
       date: toIsoDateLocal(event.date),
-      time: undefined,
+      time: event.rawTime,
     })
     const blob = new Blob([content], { type: "text/calendar;charset=utf-8" })
     const url = URL.createObjectURL(blob)
@@ -319,7 +322,7 @@ export default function CalendarPage() {
                                 title: event.title,
                                 description: event.description,
                                 date: toIsoDateLocal(event.date),
-                                time: undefined,
+                                time: event.rawTime,
                               })}
                               target="_blank"
                               rel="noreferrer"
