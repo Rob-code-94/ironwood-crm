@@ -102,6 +102,7 @@ type WorkspaceContextValue = {
   deleteProject: (id: string) => void
   addTask: (input: NewTaskInput) => Task
   updateTask: (id: string, partial: Partial<Task>) => void
+  pinTaskToLineup: (id: string) => void
   /** Set the same due date on many tasks (undefined clears). */
   bulkSetTaskDueDates: (taskIds: string[], dueDate: string | undefined) => void
   /** Shift each task’s due date by `days` (uses today if a task has no due date). */
@@ -715,6 +716,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     )
   }, [projects])
 
+  const pinTaskToLineup = useCallback((id: string) => {
+    let pinned = false
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t
+        pinned = true
+        return t.pinnedToLineup ? t : { ...t, pinnedToLineup: true }
+      })
+    )
+    if (!pinned) {
+      toast.error("Could not pin task: task no longer exists.")
+    }
+  }, [])
+
   const bulkSetTaskDueDates = useCallback(
     (taskIds: string[], dueDate: string | undefined) => {
       const idSet = new Set(taskIds)
@@ -874,8 +889,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const dismissNotification = useCallback((id: string) => {
+    const nowIso = new Date().toISOString()
+    const reminderId = id.split(":").at(-1)
+    const item = notifications.find((n) => n.id === id)
+    if (item && reminderId) {
+      if (item.sourceType === "task") {
+        setTasks((prev) =>
+          prev.map((task) => {
+            if (task.id !== item.sourceId || !task.reminders?.length) return task
+            return {
+              ...task,
+              reminders: task.reminders.map((r) =>
+                r.id === reminderId ? { ...r, dismissedAt: nowIso } : r
+              ),
+            }
+          })
+        )
+      } else {
+        setCalendarEvents((prev) =>
+          prev.map((event) => {
+            if (event.id !== item.sourceId || !event.reminders?.length) return event
+            return {
+              ...event,
+              reminders: event.reminders.map((r) =>
+                r.id === reminderId ? { ...r, dismissedAt: nowIso } : r
+              ),
+            }
+          })
+        )
+      }
+    }
     setNotifications((prev) => prev.filter((n) => n.id !== id))
-  }, [])
+  }, [notifications])
 
   const snoozeNotification = useCallback(
     (id: string, minutes?: number) => {
@@ -1000,6 +1045,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deleteProject,
       addTask,
       updateTask,
+      pinTaskToLineup,
       bulkSetTaskDueDates,
       bulkBumpTaskDueDates,
       moveTaskToStatus,
@@ -1047,6 +1093,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       deleteProject,
       addTask,
       updateTask,
+      pinTaskToLineup,
       bulkSetTaskDueDates,
       bulkBumpTaskDueDates,
       moveTaskToStatus,

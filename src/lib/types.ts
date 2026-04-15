@@ -101,6 +101,7 @@ export interface Task {
   reminders?: ReminderConfig[]
   recurrence?: RecurrenceRule
   invitees?: CalendarInvite[]
+  pinnedToLineup?: boolean
 }
 
 export interface Document {

@@ -14,18 +14,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, MagnifyingGlass, Funnel, Trash } from "@phosphor-icons/react/dist/ssr"
+import { Plus, MagnifyingGlass, Funnel, Trash, PushPin } from "@phosphor-icons/react/dist/ssr"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 import { CreateTaskDialog } from "@/components/create-task-dialog"
 import { TaskDetailDialog } from "@/components/task-detail-dialog"
-import { TaskPriorityBadge } from "@/components/task-badges"
 import { TaskStatusSelect } from "@/components/task-status-select"
 import { ResourceLinks } from "@/components/resource-links"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { DUE_DATE_QUICK_PRESETS } from "@/lib/due-date-utils"
 import { toast } from "sonner"
+import type { Priority, TaskStatus } from "@/lib/types"
 
 const ASSIGNED_PROJECT_NAMES = new Set(["Internal Tools", "Client Portal"])
+const PRIORITY_OPTIONS: Priority[] = ["urgent", "high", "medium", "low"]
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -44,6 +46,23 @@ function initialTabFromFilter(sp: { get: (k: string) => string | null }) {
   return "all"
 }
 
+const PRIORITY_ORDER: Record<Priority, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+}
+
+function cmpText(a?: string, b?: string) {
+  return (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base" })
+}
+
+function cmpDue(a?: string, b?: string) {
+  const ax = a ?? "9999-99-99"
+  const bx = b ?? "9999-99-99"
+  return ax.localeCompare(bx)
+}
+
 export default function TasksPage() {
   const searchParams = useSearchParams()
   const {
@@ -51,23 +70,37 @@ export default function TasksPage() {
     projects,
     selectedProjectFilterId,
     updateTask,
+    pinTaskToLineup,
     deleteTask,
     bulkSetTaskDueDates,
     bulkBumpTaskDueDates,
   } = useWorkspace()
 
   const [searchQuery, setSearchQuery] = useState("")
-  const [filterPriority, setFilterPriority] = useState("all")
+  const [filterPriority, setFilterPriority] = useState<"all" | Priority>("all")
   const [activeTab, setActiveTab] = useState(() => initialTabFromFilter(searchParams))
   const [createOpen, setCreateOpen] = useState(false)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
   const [selectedIdsRaw, setSelectedIdsRaw] = useState<Set<string>>(() => new Set())
   const [bulkDueDate, setBulkDueDate] = useState("")
+  const [pageProjectFilterId, setPageProjectFilterId] = useState<string>(ALL_PROJECTS_FILTER)
+  const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all")
+  const [hideDone, setHideDone] = useState(false)
+  const [sortKey, setSortKey] = useState<
+    "due-asc" | "due-desc" | "created-desc" | "priority-desc" | "project-asc" | "title-asc"
+  >("due-asc")
 
   const detailTask = useMemo(
     () => (detailTaskId ? tasks.find((t) => t.id === detailTaskId) ?? null : null),
     [tasks, detailTaskId]
   )
+
+  useEffect(() => {
+    const taskId = searchParams.get("taskId")
+    if (!taskId) return
+    if (!tasks.some((t) => t.id === taskId)) return
+    startTransition(() => setDetailTaskId(taskId))
+  }, [searchParams, tasks])
 
   useEffect(() => {
     const f = searchParams.get("filter")
@@ -78,13 +111,76 @@ export default function TasksPage() {
     startTransition(() => setActiveTab(next))
   }, [searchParams])
 
+  useEffect(() => {
+    const scope = searchParams.get("scope")
+    const project = searchParams.get("project")
+    const status = searchParams.get("status")
+    const priority = searchParams.get("priority")
+    const sort = searchParams.get("sort")
+    const hideDoneParam = searchParams.get("hideDone")
+
+    startTransition(() => {
+      if (scope === "all") {
+        setPageProjectFilterId(ALL_PROJECTS_FILTER)
+      } else if (project && projects.some((p) => p.id === project)) {
+        setPageProjectFilterId(project)
+      } else {
+        setPageProjectFilterId(
+          selectedProjectFilterId === ALL_PROJECTS_FILTER
+            ? ALL_PROJECTS_FILTER
+            : selectedProjectFilterId
+        )
+      }
+
+      if (
+        status === "todo" ||
+        status === "in-progress" ||
+        status === "review" ||
+        status === "done"
+      ) {
+        setStatusFilter(status)
+      } else {
+        setStatusFilter("all")
+      }
+
+      if (priority === "urgent" || priority === "high" || priority === "medium" || priority === "low") {
+        setFilterPriority(priority)
+      } else {
+        setFilterPriority("all")
+      }
+
+      if (
+        sort === "due-asc" ||
+        sort === "due-desc" ||
+        sort === "created-desc" ||
+        sort === "priority-desc" ||
+        sort === "project-asc" ||
+        sort === "title-asc"
+      ) {
+        setSortKey(sort)
+      } else {
+        setSortKey("due-asc")
+      }
+
+      setHideDone(hideDoneParam === "1" || hideDoneParam === "true")
+    })
+  }, [searchParams, projects, selectedProjectFilterId])
+
   const scopedTasks = useMemo(() => {
-    if (selectedProjectFilterId === ALL_PROJECTS_FILTER) return tasks
-    return tasks.filter((t) => t.projectId === selectedProjectFilterId)
-  }, [tasks, selectedProjectFilterId])
+    if (pageProjectFilterId === ALL_PROJECTS_FILTER) return tasks
+    return tasks.filter((t) => t.projectId === pageProjectFilterId)
+  }, [tasks, pageProjectFilterId])
 
   const filteredTasks = useMemo(() => {
     let filtered = scopedTasks
+
+    if (hideDone) {
+      filtered = filtered.filter((t) => t.status !== "done")
+    }
+
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((t) => t.status === statusFilter)
+    }
 
     if (activeTab === "my-tasks") {
       filtered = filtered.filter((t) => t.status !== "done")
@@ -111,8 +207,34 @@ export default function TasksPage() {
       )
     }
 
-    return filtered
-  }, [scopedTasks, activeTab, filterPriority, searchQuery])
+    const next = [...filtered]
+    next.sort((a, b) => {
+      switch (sortKey) {
+        case "due-desc":
+          return cmpDue(b.dueDate, a.dueDate)
+        case "created-desc":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        case "priority-desc": {
+          const pa = PRIORITY_ORDER[a.priority]
+          const pb = PRIORITY_ORDER[b.priority]
+          if (pa !== pb) return pa - pb
+          return cmpDue(a.dueDate, b.dueDate)
+        }
+        case "project-asc": {
+          const pc = cmpText(a.projectName, b.projectName)
+          if (pc !== 0) return pc
+          return cmpText(a.title, b.title)
+        }
+        case "title-asc":
+          return cmpText(a.title, b.title)
+        case "due-asc":
+        default:
+          return cmpDue(a.dueDate, b.dueDate)
+      }
+    })
+
+    return next
+  }, [scopedTasks, activeTab, filterPriority, searchQuery, hideDone, statusFilter, sortKey])
 
   const allowedTaskIds = useMemo(
     () => new Set(filteredTasks.map((t) => t.id)),
@@ -152,11 +274,11 @@ export default function TasksPage() {
           <p className="text-xs text-muted-foreground mt-1">
             Click a task title to open details (description, links, tags).
           </p>
-          {selectedProjectFilterId !== ALL_PROJECTS_FILTER && (
+          {pageProjectFilterId !== ALL_PROJECTS_FILTER && (
             <p className="text-xs text-muted-foreground mt-1">
-              Filtered by project:{" "}
+              Showing tasks for:{" "}
               <span className="font-medium text-foreground">
-                {projects.find((p) => p.id === selectedProjectFilterId)?.name}
+                {projects.find((p) => p.id === pageProjectFilterId)?.name}
               </span>
             </p>
           )}
@@ -196,6 +318,86 @@ export default function TasksPage() {
         </TabsList>
 
         <TabsContent value={activeTab} className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Project</Label>
+              <Select
+                value={pageProjectFilterId}
+                onValueChange={(v) => {
+                  if (v == null) return
+                  setPageProjectFilterId(v)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All projects" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_PROJECTS_FILTER}>All projects</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  if (v == null) return
+                  setStatusFilter(v as typeof statusFilter)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="todo">To do</SelectItem>
+                  <SelectItem value="in-progress">In progress</SelectItem>
+                  <SelectItem value="review">Review</SelectItem>
+                  <SelectItem value="done">Done</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Sort</Label>
+              <Select
+                value={sortKey}
+                onValueChange={(v) => {
+                  if (v == null) return
+                  setSortKey(v as typeof sortKey)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="due-asc">Due date (soonest)</SelectItem>
+                  <SelectItem value="due-desc">Due date (latest)</SelectItem>
+                  <SelectItem value="created-desc">Recently created</SelectItem>
+                  <SelectItem value="priority-desc">Priority (highest first)</SelectItem>
+                  <SelectItem value="project-asc">Project (A–Z)</SelectItem>
+                  <SelectItem value="title-asc">Title (A–Z)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end gap-2 pb-1">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="hide-done"
+                  checked={hideDone}
+                  onCheckedChange={(checked) => setHideDone(checked === true)}
+                />
+                <Label htmlFor="hide-done" className="text-xs text-muted-foreground">
+                  Hide done
+                </Label>
+              </div>
+            </div>
+          </div>
+
           <div className="flex gap-3">
             <div className="flex-1 relative">
               <MagnifyingGlass
@@ -212,7 +414,7 @@ export default function TasksPage() {
             <Select
               value={filterPriority}
               onValueChange={(v) => {
-                if (v != null) setFilterPriority(v)
+                if (v != null) setFilterPriority(v as typeof filterPriority)
               }}
             >
               <SelectTrigger className="w-32">
@@ -346,8 +548,8 @@ export default function TasksPage() {
                         <th className="px-4 py-3 text-left font-medium">Task</th>
                         <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Project</th>
                         <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Links</th>
-                        <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Priority</th>
-                        <th className="px-4 py-3 text-left font-medium min-w-[9.5rem]">Status</th>
+                        <th className="px-4 py-3 text-left font-medium hidden lg:table-cell min-w-[9rem]">Priority</th>
+                        <th className="px-4 py-3 text-left font-medium min-w-[8.25rem]">Status</th>
                         <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
                         <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Reminder</th>
                         <th className="px-4 py-3 text-right font-medium w-[1%]">Actions</th>
@@ -390,11 +592,29 @@ export default function TasksPage() {
                           <td className="px-4 py-3 hidden xl:table-cell align-top">
                             <ResourceLinks links={task.links} compact />
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell">
-                            <TaskPriorityBadge priority={task.priority} />
+                          <td className="px-4 py-2 hidden lg:table-cell">
+                            <Select
+                              value={task.priority}
+                              onValueChange={(v) => {
+                                if (v != null) updateTask(task.id, { priority: v as Priority })
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-[8.5rem] text-xs capitalize">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PRIORITY_OPTIONS.map((priority) => (
+                                  <SelectItem key={priority} value={priority} className="capitalize">
+                                    {priority}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </td>
-                          <td className="px-4 py-3 align-middle">
+                          <td className="px-4 py-2 align-middle">
                             <TaskStatusSelect
+                              size="compact"
+                              className="w-[8rem] max-w-[8rem]"
                               value={task.status}
                               onChange={(status) => updateTask(task.id, { status })}
                             />
@@ -406,6 +626,25 @@ export default function TasksPage() {
                             {task.reminders?.[0] ? `${task.reminders[0].minutesBefore}m before` : "—"}
                           </td>
                           <td className="px-4 py-3 text-right align-middle">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className={
+                                task.pinnedToLineup
+                                  ? "text-primary hover:text-primary"
+                                  : "text-muted-foreground hover:text-foreground"
+                              }
+                              aria-label={`${task.pinnedToLineup ? "Unpin" : "Pin"} task to taskbar: ${task.title}`}
+                              title={task.pinnedToLineup ? "Pinned to taskbar" : "Pin to taskbar"}
+                              onClick={() =>
+                                task.pinnedToLineup
+                                  ? updateTask(task.id, { pinnedToLineup: false })
+                                  : pinTaskToLineup(task.id)
+                              }
+                            >
+                              <PushPin size={18} weight={task.pinnedToLineup ? "fill" : "regular"} />
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"

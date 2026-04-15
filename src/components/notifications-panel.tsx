@@ -7,26 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Bell, ClockCountdown, X, CheckCircle, PushPin } from "@phosphor-icons/react/dist/ssr"
 import { useWorkspace } from "@/lib/workspace/context"
 
-const PINNED_TASKS_KEY = "ironwood_task_lineup_pinned_v1"
-const TASK_PIN_EVENT = "ironwood-task-lineup-pin"
-
-function pinTaskToLineup(taskId: string) {
-  if (typeof window === "undefined") return
-  let next: string[] = []
-  try {
-    const raw = localStorage.getItem(PINNED_TASKS_KEY)
-    const parsed = raw ? (JSON.parse(raw) as unknown) : []
-    if (Array.isArray(parsed)) next = parsed.filter((x): x is string => typeof x === "string")
-  } catch {
-    next = []
-  }
-  if (!next.includes(taskId)) {
-    next.push(taskId)
-    localStorage.setItem(PINNED_TASKS_KEY, JSON.stringify(next))
-  }
-  window.dispatchEvent(new CustomEvent(TASK_PIN_EVENT, { detail: { taskId } }))
-}
-
 export function NotificationsPanel() {
   const {
     notifications,
@@ -34,6 +14,7 @@ export function NotificationsPanel() {
     dismissNotification,
     clearNotifications,
     snoozeNotification,
+    pinTaskToLineup,
   } = useWorkspace()
   const unreadCount = useMemo(
     () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),
