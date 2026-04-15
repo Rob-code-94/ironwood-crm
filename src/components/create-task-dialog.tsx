@@ -25,6 +25,7 @@ import { toast } from "sonner"
 import { Plus, Trash } from "@phosphor-icons/react/dist/ssr"
 import { DueDateQuickChips } from "@/components/due-date-quick-chips"
 import { isoDateAddDaysFromToday } from "@/lib/due-date-utils"
+import { ReminderControls } from "@/components/reminder-controls"
 
 type CreateTaskDialogProps = {
   open: boolean
@@ -59,6 +60,9 @@ export function CreateTaskDialog({
   const [tagsRaw, setTagsRaw] = useState("")
   const [sortOrder, setSortOrder] = useState("")
   const [linkRows, setLinkRows] = useState<{ label: string; href: string }[]>([emptyLink()])
+  const [reminderMinutesBefore, setReminderMinutesBefore] = useState(60)
+  const [recurrence, setRecurrence] = useState<"none" | "daily" | "weekly" | "monthly">("none")
+  const [inviteesRaw, setInviteesRaw] = useState("")
 
   useEffect(() => {
     if (!open) return
@@ -92,6 +96,9 @@ export function CreateTaskDialog({
     setTagsRaw("")
     setSortOrder("")
     setLinkRows([emptyLink()])
+    setReminderMinutesBefore(60)
+    setRecurrence("none")
+    setInviteesRaw("")
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -105,6 +112,10 @@ export function CreateTaskDialog({
     const links = linkRows
       .filter((r) => r.label.trim() && r.href.trim())
       .map((r) => ({ label: r.label.trim(), href: r.href.trim() }))
+    const invitees = inviteesRaw
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
     addTask({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -117,6 +128,26 @@ export function CreateTaskDialog({
       tags: tags.length ? tags : undefined,
       sortOrder: Number.isFinite(so) ? so : undefined,
       links: links.length ? links : undefined,
+      reminders: [
+        {
+          id: crypto.randomUUID(),
+          minutesBefore: reminderMinutesBefore,
+          channels: ["in_app", "push"],
+        },
+      ],
+      recurrence:
+        recurrence === "none"
+          ? undefined
+          : {
+              frequency: recurrence,
+            },
+      invitees: invitees.length
+        ? invitees.map((email) => ({
+            id: crypto.randomUUID(),
+            email,
+            status: "pending",
+          }))
+        : undefined,
     })
     toast.success("Task created")
     reset()
@@ -326,6 +357,14 @@ export function CreateTaskDialog({
               />
             </div>
           </div>
+          <ReminderControls
+            minutesBefore={reminderMinutesBefore}
+            onMinutesBeforeChange={setReminderMinutesBefore}
+            recurrence={recurrence}
+            onRecurrenceChange={setRecurrence}
+            inviteesRaw={inviteesRaw}
+            onInviteesRawChange={setInviteesRaw}
+          />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel

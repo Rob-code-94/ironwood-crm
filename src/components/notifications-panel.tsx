@@ -1,44 +1,44 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Bell, X, CheckCircle, WarningCircle, Info } from "@phosphor-icons/react/dist/ssr"
+import { Bell, ClockCountdown, X, CheckCircle, PushPin } from "@phosphor-icons/react/dist/ssr"
+import { useWorkspace } from "@/lib/workspace/context"
 
-interface Notification {
-  id: string
-  title: string
-  message: string
-  type: "success" | "warning" | "info"
-  timestamp: string
-  read: boolean
-}
+const PINNED_TASKS_KEY = "ironwood_task_lineup_pinned_v1"
+const TASK_PIN_EVENT = "ironwood-task-lineup-pin"
 
-const typeConfig = {
-  success: { icon: CheckCircle, bgColor: "bg-green-50", borderColor: "border-green-200" },
-  warning: { icon: WarningCircle, bgColor: "bg-yellow-50", borderColor: "border-yellow-200" },
-  info: { icon: Info, bgColor: "bg-blue-50", borderColor: "border-blue-200" },
+function pinTaskToLineup(taskId: string) {
+  if (typeof window === "undefined") return
+  let next: string[] = []
+  try {
+    const raw = localStorage.getItem(PINNED_TASKS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    if (Array.isArray(parsed)) next = parsed.filter((x): x is string => typeof x === "string")
+  } catch {
+    next = []
+  }
+  if (!next.includes(taskId)) {
+    next.push(taskId)
+    localStorage.setItem(PINNED_TASKS_KEY, JSON.stringify(next))
+  }
+  window.dispatchEvent(new CustomEvent(TASK_PIN_EVENT, { detail: { taskId } }))
 }
 
 export function NotificationsPanel() {
-  const [notifications, setNotifications] = useState<Notification[]>([])
-
-  const unreadCount = notifications.filter((n) => !n.read).length
-
-  const handleMarkAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    )
-  }
-
-  const handleDismiss = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id))
-  }
-
-  const handleClearAll = () => {
-    setNotifications([])
-  }
+  const {
+    notifications,
+    markNotificationRead,
+    dismissNotification,
+    clearNotifications,
+    snoozeNotification,
+  } = useWorkspace()
+  const unreadCount = useMemo(
+    () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),
+    [notifications]
+  )
 
   return (
     <Card className="w-full max-w-md">
@@ -57,7 +57,7 @@ export function NotificationsPanel() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleClearAll}
+                onClick={clearNotifications}
               className="text-xs"
             >
               Clear all
@@ -69,34 +69,63 @@ export function NotificationsPanel() {
         {notifications.length > 0 ? (
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
             {notifications.map((notification) => {
-              const config = typeConfig[notification.type]
-              const Icon = config.icon
-
               return (
                 <div
                   key={notification.id}
-                  className={`p-3 rounded-lg border ${config.bgColor} ${config.borderColor} cursor-pointer hover:shadow-sm transition-shadow ${
+                  className={`rounded-lg border border-border/70 bg-muted/30 p-3 transition-shadow hover:shadow-sm ${
                     !notification.read ? "border-l-4" : ""
                   }`}
-                  onClick={() => handleMarkAsRead(notification.id)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 flex-1">
-                      <Icon size={18} className="mt-0.5 flex-shrink-0" />
+                      <Bell size={18} className="mt-0.5 flex-shrink-0 text-primary" />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm">{notification.title}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {notification.message}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1.5">
-                          {notification.timestamp}
+                          {new Date(notification.createdAt).toLocaleString()}
                         </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {!notification.read && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="h-7 text-xs"
+                              onClick={() => markNotificationRead(notification.id)}
+                            >
+                              <CheckCircle size={14} className="mr-1" />
+                              Mark read
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={() => snoozeNotification(notification.id)}
+                          >
+                            <ClockCountdown size={14} className="mr-1" />
+                            Snooze
+                          </Button>
+                          {notification.sourceType === "task" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => pinTaskToLineup(notification.sourceId)}
+                            >
+                              <PushPin size={14} className="mr-1" />
+                              Pin to taskbar
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleDismiss(notification.id)
+                        dismissNotification(notification.id)
                       }}
                       className="text-muted-foreground hover:text-foreground flex-shrink-0"
                     >

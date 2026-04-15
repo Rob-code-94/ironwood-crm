@@ -25,6 +25,7 @@ import type { Priority, Task, TaskStatus } from "@/lib/types"
 import { toast } from "sonner"
 import { Plus, Trash } from "@phosphor-icons/react/dist/ssr"
 import { DueDateQuickChips } from "@/components/due-date-quick-chips"
+import { ReminderControls } from "@/components/reminder-controls"
 
 type TaskDetailDialogProps = {
   task: Task | null
@@ -48,6 +49,9 @@ function hydrateFromTask(t: Task) {
     tagsRaw: (t.tags ?? []).join(", "),
     sortOrder: t.sortOrder != null ? String(t.sortOrder) : "",
     projectId: t.projectId ?? "",
+    reminderMinutesBefore: t.reminders?.[0]?.minutesBefore ?? 60,
+    recurrence: (t.recurrence?.frequency ?? "none") as "none" | "daily" | "weekly" | "monthly",
+    inviteesRaw: (t.invitees ?? []).map((x) => x.email).join(", "),
     linkRows:
       t.links?.length && t.links.some((l) => l.label.trim() || l.href.trim())
         ? t.links.map((l) => ({ label: l.label, href: l.href }))
@@ -68,6 +72,9 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
   const [tagsRaw, setTagsRaw] = useState("")
   const [sortOrder, setSortOrder] = useState("")
   const [projectId, setProjectId] = useState("")
+  const [reminderMinutesBefore, setReminderMinutesBefore] = useState(60)
+  const [recurrence, setRecurrence] = useState<"none" | "daily" | "weekly" | "monthly">("none")
+  const [inviteesRaw, setInviteesRaw] = useState("")
   const [linkRows, setLinkRows] = useState<{ label: string; href: string }[]>([emptyLink()])
 
   const resetFromTask = useCallback((t: Task) => {
@@ -82,6 +89,9 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
     setTagsRaw(h.tagsRaw)
     setSortOrder(h.sortOrder)
     setProjectId(h.projectId)
+    setReminderMinutesBefore(h.reminderMinutesBefore)
+    setRecurrence(h.recurrence)
+    setInviteesRaw(h.inviteesRaw)
     setLinkRows(h.linkRows)
   }, [])
 
@@ -90,7 +100,7 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
     startTransition(() => {
       resetFromTask(task)
     })
-  }, [open, task?.id, resetFromTask])
+  }, [open, task, resetFromTask])
 
   const handleSave = () => {
     if (!task) return
@@ -106,6 +116,10 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
     const links = linkRows
       .filter((r) => r.label.trim() && r.href.trim())
       .map((r) => ({ label: r.label.trim(), href: r.href.trim() }))
+    const invitees = inviteesRaw
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
     updateTask(task.id, {
       title: title.trim(),
       description: description.trim() || undefined,
@@ -118,6 +132,21 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
       sortOrder: Number.isFinite(so) ? so : undefined,
       links: links.length ? links : undefined,
       projectId: projectId.trim() || undefined,
+      reminders: [
+        {
+          id: task.reminders?.[0]?.id ?? crypto.randomUUID(),
+          minutesBefore: reminderMinutesBefore,
+          channels: ["in_app", "push"],
+        },
+      ],
+      recurrence: recurrence === "none" ? undefined : { frequency: recurrence },
+      invitees: invitees.length
+        ? invitees.map((email, idx) => ({
+            id: task.invitees?.[idx]?.id ?? crypto.randomUUID(),
+            email,
+            status: "pending",
+          }))
+        : undefined,
     })
     toast.success("Task saved")
     onOpenChange(false)
@@ -317,6 +346,14 @@ export function TaskDetailDialog({ task, open, onOpenChange }: TaskDetailDialogP
                   />
                 </div>
               </div>
+              <ReminderControls
+                minutesBefore={reminderMinutesBefore}
+                onMinutesBeforeChange={setReminderMinutesBefore}
+                recurrence={recurrence}
+                onRecurrenceChange={setRecurrence}
+                inviteesRaw={inviteesRaw}
+                onInviteesRawChange={setInviteesRaw}
+              />
             </div>
           </div>
 

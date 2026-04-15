@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/lib/workspace/context"
 import { CalendarBlank } from "@phosphor-icons/react/dist/ssr"
 
@@ -23,7 +25,12 @@ const PRESETS: { value: string; label: string }[] = [
 ]
 
 export function PlannerSettingsCard() {
-  const { taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays } = useWorkspace()
+  const {
+    taskDefaultDueOffsetDays,
+    setTaskDefaultDueOffsetDays,
+    notificationPreferences,
+    updateNotificationPreferences,
+  } = useWorkspace()
   const selectValue =
     taskDefaultDueOffsetDays == null
       ? "none"
@@ -81,6 +88,53 @@ export function PlannerSettingsCard() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+          <p className="text-sm font-medium">Reminder notifications</p>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm">In-app reminders</p>
+              <p className="text-xs text-muted-foreground">Show due reminders in the notification center.</p>
+            </div>
+            <Switch
+              checked={notificationPreferences.inAppEnabled}
+              onCheckedChange={(checked) => updateNotificationPreferences({ inAppEnabled: checked })}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm">Browser push-style alerts</p>
+              <p className="text-xs text-muted-foreground">Display system notifications when reminders trigger.</p>
+            </div>
+            <Switch
+              checked={notificationPreferences.pushEnabled}
+              onCheckedChange={(checked) => updateNotificationPreferences({ pushEnabled: checked })}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!("Notification" in window)) return
+                await Notification.requestPermission()
+              }}
+            >
+              Enable permission
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!("serviceWorker" in navigator)) return
+                await navigator.serviceWorker.register("/reminder-sw.js")
+              }}
+            >
+              Register worker
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

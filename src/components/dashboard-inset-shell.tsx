@@ -3,6 +3,9 @@
 import { type ReactNode } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { MobileNav } from "@/components/mobile-nav"
+import { NotificationBell } from "@/components/notification-bell"
+import { NotificationPushBridge } from "@/components/notification-push-bridge"
+import { TaskLineupBar } from "@/components/task-lineup-bar"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import {
   SidebarInset,
@@ -34,8 +37,10 @@ export function DashboardInsetShell({
       }
     >
       <AppSidebar variant="inset" className="hidden md:flex" />
+      <NotificationPushBridge />
       <SidebarInset className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <TaskLineupBar />
           <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4">
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger className="-ml-1 hidden md:inline-flex" />
@@ -49,6 +54,7 @@ export function DashboardInsetShell({
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              <NotificationBell />
               <ThemeSwitcher />
             </div>
           </header>

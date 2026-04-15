@@ -4,6 +4,8 @@ import type {
   Contact,
   Deal,
   Document,
+  NotificationPreferences,
+  PlannerNotification,
   Project,
   SavedChatTurn,
   Task,
@@ -28,6 +30,8 @@ export type WorkspaceSnapshotV1 = {
    * `null` / omitted = no default.
    */
   taskDefaultDueOffsetDays?: number | null
+  notificationPreferences?: NotificationPreferences
+  notifications?: PlannerNotification[]
   /** Unix ms - used to pick newer data when syncing to a shared file across worktrees */
   persistedAt?: number
 }
@@ -51,6 +55,13 @@ export function emptyWorkspaceSnapshot(): WorkspaceSnapshotV1 {
     documents: [],
     calendarEvents: [],
     taskDefaultDueOffsetDays: null,
+    notificationPreferences: {
+      inAppEnabled: true,
+      pushEnabled: false,
+      defaultReminderMinutesBefore: 60,
+      defaultSnoozeMinutes: 10,
+    },
+    notifications: [],
     // No timestamp — merge logic treats this as bootstrap empty (won't beat real local data).
     persistedAt: undefined,
   }
@@ -75,6 +86,26 @@ export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 |
   } else if (d.taskDefaultDueOffsetDays === null) {
     taskDefaultDueOffsetDays = null
   }
+  const prefsRaw =
+    d.notificationPreferences && typeof d.notificationPreferences === "object"
+      ? (d.notificationPreferences as Record<string, unknown>)
+      : {}
+  const defaultReminderMinutesBefore = Number(prefsRaw.defaultReminderMinutesBefore)
+  const defaultSnoozeMinutes = Number(prefsRaw.defaultSnoozeMinutes)
+  const notificationPreferences: NotificationPreferences = {
+    inAppEnabled: prefsRaw.inAppEnabled !== false,
+    pushEnabled: prefsRaw.pushEnabled === true,
+    defaultReminderMinutesBefore:
+      Number.isFinite(defaultReminderMinutesBefore) && defaultReminderMinutesBefore >= 0
+        ? Math.floor(defaultReminderMinutesBefore)
+        : 60,
+    defaultSnoozeMinutes:
+      Number.isFinite(defaultSnoozeMinutes) && defaultSnoozeMinutes > 0
+        ? Math.floor(defaultSnoozeMinutes)
+        : 10,
+  }
+  const notifications = Array.isArray(d.notifications) ? (d.notifications as PlannerNotification[]) : []
+
   const persistedAt =
     typeof d.persistedAt === "number" && Number.isFinite(d.persistedAt)
       ? d.persistedAt
@@ -91,6 +122,8 @@ export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 |
     documents: documents as Document[],
     calendarEvents,
     taskDefaultDueOffsetDays,
+    notificationPreferences,
+    notifications,
     persistedAt,
   }
 }

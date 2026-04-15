@@ -20,6 +20,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { CalendarPlus, Trash } from "@phosphor-icons/react/dist/ssr"
 import { useWorkspace } from "@/lib/workspace/context"
 import { formatCalendarTimeLabel, toIsoDateLocal } from "@/lib/due-date-utils"
+import { ReminderControls } from "@/components/reminder-controls"
+import { buildIcsFileContent, toGoogleCalendarUrl } from "@/lib/reminders"
 import { toast } from "sonner"
 
 type CalEvent = {
@@ -74,7 +76,10 @@ export default function CalendarPage() {
     title: "",
     time: "",
     description: "",
+    inviteesRaw: "",
   })
+  const [eventReminderMinutes, setEventReminderMinutes] = useState(60)
+  const [eventRecurrence, setEventRecurrence] = useState<"none" | "daily" | "weekly" | "monthly">("none")
 
   const taskEvents = useMemo((): CalEvent[] => {
     return tasks
@@ -120,11 +125,44 @@ export default function CalendarPage() {
       date: toIsoDateLocal(date),
       time: newEvent.time.trim() || undefined,
       description: newEvent.description.trim() || undefined,
+      reminders: [
+        {
+          id: crypto.randomUUID(),
+          minutesBefore: eventReminderMinutes,
+          channels: ["in_app", "push"],
+        },
+      ],
+      recurrence: eventRecurrence === "none" ? undefined : { frequency: eventRecurrence },
+      invitees: newEvent.inviteesRaw
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean),
     })
     toast.success("Event saved to workspace")
-    setNewEvent({ title: "", time: "", description: "" })
+    setNewEvent({ title: "", time: "", description: "", inviteesRaw: "" })
+    setEventReminderMinutes(60)
+    setEventRecurrence("none")
     setEventDialogOpen(false)
   }
+  const exportEventToIcs = (event: CalEvent) => {
+    const content = buildIcsFileContent({
+      uid: event.id,
+      title: event.title,
+      description: event.description,
+      date: toIsoDateLocal(event.date),
+      time: undefined,
+    })
+    const blob = new Blob([content], { type: "text/calendar;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `${event.title.replace(/\s+/g, "-").toLowerCase() || "event"}.ics`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
 
   const selectedDateEvents = allEvents.filter(
     (event) => event.date.toDateString() === date?.toDateString()
@@ -215,6 +253,14 @@ export default function CalendarPage() {
                       rows={3}
                     />
                   </div>
+                  <ReminderControls
+                    minutesBefore={eventReminderMinutes}
+                    onMinutesBeforeChange={setEventReminderMinutes}
+                    recurrence={eventRecurrence}
+                    onRecurrenceChange={setEventRecurrence}
+                    inviteesRaw={newEvent.inviteesRaw}
+                    onInviteesRawChange={(v) => setNewEvent((prev) => ({ ...prev, inviteesRaw: v }))}
+                  />
 
                   <div className="flex justify-end gap-3 pt-4">
                     <Button
@@ -267,6 +313,28 @@ export default function CalendarPage() {
                           {event.description && (
                             <p className="text-sm text-muted-foreground">{event.description}</p>
                           )}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <a
+                              href={toGoogleCalendarUrl({
+                                title: event.title,
+                                description: event.description,
+                                date: toIsoDateLocal(event.date),
+                                time: undefined,
+                              })}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-primary underline underline-offset-2"
+                            >
+                              Add to Google Calendar
+                            </a>
+                            <button
+                              type="button"
+                              className="text-xs text-primary underline underline-offset-2"
+                              onClick={() => exportEventToIcs(event)}
+                            >
+                              Download Apple Calendar file
+                            </button>
+                          </div>
                         </div>
                         {!isTaskBackedEvent(event.id) && (
                           <Button

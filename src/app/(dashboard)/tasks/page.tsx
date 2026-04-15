@@ -349,6 +349,7 @@ export default function TasksPage() {
                         <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Priority</th>
                         <th className="px-4 py-3 text-left font-medium min-w-[9.5rem]">Status</th>
                         <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Due</th>
+                        <th className="px-4 py-3 text-left font-medium hidden xl:table-cell">Reminder</th>
                         <th className="px-4 py-3 text-right font-medium w-[1%]">Actions</th>
                       </tr>
                     </thead>
@@ -400,6 +401,9 @@ export default function TasksPage() {
                           </td>
                           <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                             {task.dueDate ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground hidden xl:table-cell">
+                            {task.reminders?.[0] ? `${task.reminders[0].minutesBefore}m before` : "—"}
                           </td>
                           <td className="px-4 py-3 text-right align-middle">
                             <Button

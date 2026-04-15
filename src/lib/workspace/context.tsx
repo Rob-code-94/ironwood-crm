@@ -20,9 +20,12 @@ import type {
   Deal,
   DealStage,
   Document,
+  NotificationPreferences,
+  PlannerNotification,
   Priority,
   Project,
   ProjectLifecycleStatus,
+  ReminderConfig,
   ResourceLink,
   SavedChatTurn,
   Task,
@@ -45,6 +48,7 @@ import {
 import { repairMissingProjectsFromRefs } from "@/lib/workspace/repair-missing-projects"
 import { wouldDestructiveOverwriteReject } from "@/lib/workspace/workspace-snapshot-guards"
 import { isoDateAddDays, toIsoDateLocal } from "@/lib/due-date-utils"
+import { collectDueNotifications, defaultReminderConfig, withReminderSnoozedUntil } from "@/lib/reminders"
 
 export const ALL_PROJECTS_FILTER = "all"
 
@@ -68,6 +72,9 @@ type NewTaskInput = {
   tags?: string[]
   sortOrder?: number
   links?: ResourceLink[]
+  reminders?: ReminderConfig[]
+  recurrence?: Task["recurrence"]
+  invitees?: Task["invitees"]
 }
 
 type WorkspaceContextValue = {
@@ -83,6 +90,13 @@ type WorkspaceContextValue = {
   setSelectedProjectFilterId: (id: string) => void
   taskDefaultDueOffsetDays: number | null
   setTaskDefaultDueOffsetDays: (days: number | null) => void
+  notificationPreferences: NotificationPreferences
+  updateNotificationPreferences: (partial: Partial<NotificationPreferences>) => void
+  notifications: PlannerNotification[]
+  markNotificationRead: (id: string) => void
+  clearNotifications: () => void
+  dismissNotification: (id: string) => void
+  snoozeNotification: (id: string, minutes?: number) => void
   addProject: (input: NewProjectInput) => Project
   updateProject: (id: string, partial: Partial<Project>) => void
   deleteProject: (id: string) => void
@@ -114,7 +128,11 @@ type WorkspaceContextValue = {
     date: string
     time?: string
     description?: string
+    reminders?: ReminderConfig[]
+    recurrence?: CalendarEvent["recurrence"]
+    invitees?: string[]
   }) => CalendarEvent
+  updateCalendarEvent: (id: string, partial: Partial<CalendarEvent>) => void
   deleteCalendarEvent: (id: string) => void
   appendSavedChatTurn: (turn: Omit<SavedChatTurn, "id" | "createdAt">) => void
   clearSavedChatTurns: () => void
@@ -169,6 +187,13 @@ function readLocalWorkspaceOrSeed(): WorkspaceSnapshotV1 {
     documents: [],
     calendarEvents: [],
     taskDefaultDueOffsetDays: null,
+    notificationPreferences: {
+      inAppEnabled: true,
+      pushEnabled: false,
+      defaultReminderMinutesBefore: 60,
+      defaultSnoozeMinutes: 10,
+    },
+    notifications: [],
     persistedAt: undefined,
   }
 }
@@ -186,6 +211,13 @@ function emptySyncWorkspace(): WorkspaceSnapshotV1 {
     documents: [],
     calendarEvents: [],
     taskDefaultDueOffsetDays: null,
+    notificationPreferences: {
+      inAppEnabled: true,
+      pushEnabled: false,
+      defaultReminderMinutesBefore: 60,
+      defaultSnoozeMinutes: 10,
+    },
+    notifications: [],
     persistedAt: undefined,
   }
 }
@@ -208,6 +240,8 @@ type WorkspaceStateSetters = {
   setDocuments: (v: SetStateAction<Document[]>) => void
   setCalendarEvents: (v: SetStateAction<CalendarEvent[]>) => void
   setTaskDefaultDueOffsetDays: (v: SetStateAction<number | null>) => void
+  setNotificationPreferences: (v: SetStateAction<NotificationPreferences>) => void
+  setNotifications: (v: SetStateAction<PlannerNotification[]>) => void
   setSelectedProjectFilterId: (v: SetStateAction<string>) => void
 }
 
@@ -232,6 +266,15 @@ function applySnapshotToSetters(
       ? remote.taskDefaultDueOffsetDays
       : null
   )
+  setters.setNotificationPreferences(
+    remote.notificationPreferences ?? {
+      inAppEnabled: true,
+      pushEnabled: false,
+      defaultReminderMinutesBefore: 60,
+      defaultSnoozeMinutes: 10,
+    }
+  )
+  setters.setNotifications(Array.isArray(remote.notifications) ? remote.notifications : [])
   setters.setSelectedProjectFilterId(remote.selectedProjectFilterId)
   lastServerPersistedAtRef.current = serverVersionFromSnapshot(remote)
   lastServerSnapshotForGuardRef.current = remote
@@ -258,6 +301,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<
     number | null
   >(() => initialSnapshot.taskDefaultDueOffsetDays ?? null)
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
+    () =>
+      initialSnapshot.notificationPreferences ?? {
+        inAppEnabled: true,
+        pushEnabled: false,
+        defaultReminderMinutesBefore: 60,
+        defaultSnoozeMinutes: 10,
+      }
+  )
+  const [notifications, setNotifications] = useState<PlannerNotification[]>(
+    () => initialSnapshot.notifications ?? []
+  )
   const [selectedProjectFilterId, setSelectedProjectFilterId] = useState(
     () => initialSnapshot.selectedProjectFilterId
   )
@@ -273,6 +328,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setDocuments,
       setCalendarEvents,
       setTaskDefaultDueOffsetDays,
+      setNotificationPreferences,
+      setNotifications,
       setSelectedProjectFilterId,
     }),
     [
@@ -285,6 +342,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setDocuments,
       setCalendarEvents,
       setTaskDefaultDueOffsetDays,
+      setNotificationPreferences,
+      setNotifications,
       setSelectedProjectFilterId,
     ]
   )
@@ -460,6 +519,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       documents,
       calendarEvents,
       taskDefaultDueOffsetDays,
+      notificationPreferences,
+      notifications,
       persistedAt: Date.now(),
     }
     const t = window.setTimeout(() => {
@@ -551,6 +612,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     documents,
     calendarEvents,
     taskDefaultDueOffsetDays,
+    notificationPreferences,
+    notifications,
     workspaceHydrated,
     applyRemoteSnapshot,
   ])
@@ -625,11 +688,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         links: input.links?.filter((l) => l.label.trim() && l.href.trim()).length
           ? input.links.filter((l) => l.label.trim() && l.href.trim())
           : undefined,
+        reminders: input.reminders?.length
+          ? input.reminders
+          : defaultReminderConfig(notificationPreferences.defaultReminderMinutesBefore),
+        recurrence: input.recurrence,
+        invitees: input.invitees,
       }
       setTasks((prev) => [...prev, next])
       return next
     },
-    [projectNameById]
+    [projectNameById, notificationPreferences.defaultReminderMinutesBefore]
   )
 
   const updateTask = useCallback((id: string, partial: Partial<Task>) => {
@@ -751,7 +819,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const addCalendarEvent = useCallback(
-    (input: { title: string; date: string; time?: string; description?: string }) => {
+    (input: {
+      title: string
+      date: string
+      time?: string
+      description?: string
+      reminders?: ReminderConfig[]
+      recurrence?: CalendarEvent["recurrence"]
+      invitees?: string[]
+    }) => {
       const next: CalendarEvent = {
         id: crypto.randomUUID(),
         title: input.title.trim(),
@@ -759,16 +835,99 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         type: "meeting",
         time: input.time?.trim() || undefined,
         description: input.description?.trim() || undefined,
+        reminders: input.reminders?.length
+          ? input.reminders
+          : defaultReminderConfig(notificationPreferences.defaultReminderMinutesBefore),
+        recurrence: input.recurrence,
+        invitees: input.invitees?.length
+          ? input.invitees.map((email) => ({
+              id: crypto.randomUUID(),
+              email: email.trim(),
+              status: "pending" as const,
+            }))
+          : undefined,
       }
       setCalendarEvents((prev) => [...prev, next])
       return next
     },
-    []
+    [notificationPreferences.defaultReminderMinutesBefore]
   )
+
+  const updateCalendarEvent = useCallback((id: string, partial: Partial<CalendarEvent>) => {
+    setCalendarEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...partial } : e)))
+  }, [])
 
   const deleteCalendarEvent = useCallback((id: string) => {
     setCalendarEvents((prev) => prev.filter((e) => e.id !== id))
   }, [])
+
+  const updateNotificationPreferences = useCallback((partial: Partial<NotificationPreferences>) => {
+    setNotificationPreferences((prev) => ({ ...prev, ...partial }))
+  }, [])
+
+  const markNotificationRead = useCallback((id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
+  }, [])
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([])
+  }, [])
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
+  }, [])
+
+  const snoozeNotification = useCallback(
+    (id: string, minutes?: number) => {
+      const item = notifications.find((n) => n.id === id)
+      if (!item) return
+      const snoozeMins = minutes ?? notificationPreferences.defaultSnoozeMinutes
+      if (item.sourceType === "task") {
+        setTasks((prev) =>
+          prev.map((task) => {
+            if (task.id !== item.sourceId || !task.reminders?.length) return task
+            return {
+              ...task,
+              reminders: task.reminders.map((r) =>
+                id.endsWith(`:${r.id}`) ? withReminderSnoozedUntil(r, snoozeMins) : r
+              ),
+            }
+          })
+        )
+      } else {
+        setCalendarEvents((prev) =>
+          prev.map((event) => {
+            if (event.id !== item.sourceId || !event.reminders?.length) return event
+            return {
+              ...event,
+              reminders: event.reminders.map((r) =>
+                id.endsWith(`:${r.id}`) ? withReminderSnoozedUntil(r, snoozeMins) : r
+              ),
+            }
+          })
+        )
+      }
+      setNotifications((prev) => prev.filter((n) => n.id !== id))
+    },
+    [notifications, notificationPreferences.defaultSnoozeMinutes]
+  )
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!notificationPreferences.inAppEnabled && !notificationPreferences.pushEnabled) return
+      setNotifications((prev) => {
+        const due = collectDueNotifications(
+          tasks,
+          calendarEvents,
+          prev,
+          notificationPreferences
+        )
+        if (!due.length) return prev
+        return [...due, ...prev].slice(0, 120)
+      })
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [tasks, calendarEvents, notificationPreferences])
 
   const advanceDealStage = useCallback((dealId: string) => {
     const order: DealStage[] = [
@@ -829,6 +988,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setSelectedProjectFilterId,
       taskDefaultDueOffsetDays,
       setTaskDefaultDueOffsetDays,
+      notificationPreferences,
+      updateNotificationPreferences,
+      notifications,
+      markNotificationRead,
+      clearNotifications,
+      dismissNotification,
+      snoozeNotification,
       addProject,
       updateProject,
       deleteProject,
@@ -846,6 +1012,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       updateDeal,
       advanceDealStage,
       addCalendarEvent,
+      updateCalendarEvent,
       deleteCalendarEvent,
       appendSavedChatTurn,
       clearSavedChatTurns,
@@ -866,6 +1033,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       savedChatTurns,
       selectedProjectFilterId,
       taskDefaultDueOffsetDays,
+      notificationPreferences,
+      notifications,
+      updateNotificationPreferences,
+      markNotificationRead,
+      clearNotifications,
+      dismissNotification,
+      snoozeNotification,
       workspaceRemoteLoading,
       repairWorkspaceFromRefs,
       addProject,
@@ -885,6 +1059,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       updateDeal,
       advanceDealStage,
       addCalendarEvent,
+      updateCalendarEvent,
       deleteCalendarEvent,
       appendSavedChatTurn,
       clearSavedChatTurns,

@@ -184,7 +184,10 @@ function KanbanTaskCard({
         )}
 
         {task.dueDate && (
-          <div className="text-xs text-muted-foreground">Due: {task.dueDate}</div>
+          <div className="text-xs text-muted-foreground">
+            Due: {task.dueDate}
+            {task.reminders?.[0] ? ` · reminder ${task.reminders[0].minutesBefore}m before` : ""}
+          </div>
         )}
       </CardContent>
     </Card>

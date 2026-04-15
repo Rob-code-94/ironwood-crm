@@ -3,11 +3,39 @@ export type TaskStatus = "todo" | "in-progress" | "review" | "done"
 export type ProjectLifecycleStatus = "active" | "planning" | "completed" | "archived"
 export type DealStage = "lead" | "qualified" | "proposal" | "negotiation" | "won" | "lost"
 export type DocumentType = "pdf" | "image" | "spreadsheet" | "document" | "other"
+export type ReminderChannel = "in_app" | "push"
+export type RecurrenceFrequency = "daily" | "weekly" | "monthly"
 
 /** Clickable resource (portal, doc, phone as tel:, etc.) — reusable across entities */
 export interface ResourceLink {
   label: string
   href: string
+}
+
+export interface ReminderConfig {
+  id: string
+  /** Negative offset from due/event time in minutes. */
+  minutesBefore: number
+  channels: ReminderChannel[]
+  /** Runtime state for local scheduling. */
+  lastTriggeredAt?: string
+  dismissedAt?: string
+  snoozedUntil?: string
+}
+
+export interface RecurrenceRule {
+  frequency: RecurrenceFrequency
+  interval?: number
+  /** Weekday indexes: 0 (Sun) -> 6 (Sat), used for weekly recurrence. */
+  byWeekday?: number[]
+  /** YYYY-MM-DD local calendar date; no events are generated after this. */
+  untilDate?: string
+}
+
+export interface CalendarInvite {
+  id: string
+  email: string
+  status: "pending" | "accepted" | "declined"
 }
 
 export interface Project {
@@ -70,6 +98,9 @@ export interface Task {
   /** Sort within a section (lower first) */
   sortOrder?: number
   links?: ResourceLink[]
+  reminders?: ReminderConfig[]
+  recurrence?: RecurrenceRule
+  invitees?: CalendarInvite[]
 }
 
 export interface Document {
@@ -135,6 +166,28 @@ export interface CalendarEvent {
   /** HTML time input value e.g. "14:30", or empty for all-day */
   time?: string
   description?: string
+  reminders?: ReminderConfig[]
+  recurrence?: RecurrenceRule
+  invitees?: CalendarInvite[]
+}
+
+export interface PlannerNotification {
+  id: string
+  sourceType: "task" | "event"
+  sourceId: string
+  sourceDate: string
+  title: string
+  message: string
+  scheduledAt: string
+  createdAt: string
+  read: boolean
+}
+
+export interface NotificationPreferences {
+  inAppEnabled: boolean
+  pushEnabled: boolean
+  defaultReminderMinutesBefore: number
+  defaultSnoozeMinutes: number
 }
 
 /** Persisted Q&A from advisor chat (generic, any project) */

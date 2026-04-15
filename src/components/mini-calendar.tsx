@@ -34,6 +34,8 @@ function dueDatesByDayForMonth(
   return map
 }
 
+const MAX_TASKS_PER_DAY_PREVIEW = 3
+
 export function MiniCalendar() {
   const { tasks } = useWorkspace()
   const [currentDate, setCurrentDate] = useState(() => new Date())
@@ -196,7 +198,7 @@ export function MiniCalendar() {
             <p className="text-xs font-medium text-foreground">{selectedLabel}</p>
             {tasksForSelectedDay.length > 0 ? (
               <ul className="max-h-28 space-y-1 overflow-y-auto text-xs">
-                {tasksForSelectedDay.map((t) => (
+                {tasksForSelectedDay.slice(0, MAX_TASKS_PER_DAY_PREVIEW).map((t) => (
                   <li key={t.id}>
                     <button
                       type="button"
@@ -207,6 +209,11 @@ export function MiniCalendar() {
                     </button>
                   </li>
                 ))}
+                {tasksForSelectedDay.length > MAX_TASKS_PER_DAY_PREVIEW ? (
+                  <li className="text-muted-foreground">
+                    +{tasksForSelectedDay.length - MAX_TASKS_PER_DAY_PREVIEW} more
+                  </li>
+                ) : null}
               </ul>
             ) : (
               <p className="text-xs text-muted-foreground">No tasks due this day.</p>
