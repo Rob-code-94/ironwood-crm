@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   description: "All-in-one CRM and SaaS platform for project management, task tracking, and team collaboration",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/icon",
+    icon: "/favicon.png",
     apple: "/apple-icon",
   },
   appleWebApp: {
