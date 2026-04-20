@@ -1,0 +1,79 @@
+name: Desktop release
+
+# Builds and publishes the Electron desktop app whenever you push a `v*` tag.
+# Outputs (DMG + ZIP for arm64 and x64) attach to a GitHub Release that
+# electron-updater discovers via `latest-mac.yml`.
+#
+# To run a manual build without publishing, use the "Run workflow" button.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish artifacts to a GitHub Release"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Ironwood Planner (macOS)
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    env:
+      # Set these as repository secrets to enable Developer ID signing +
+      # notarization. Without them, electron-builder ships an unsigned bundle
+      # that users must right-click + Open the first time.
+      CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js standalone bundle
+        run: npm run electron:build
+
+      - name: Package + publish (tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npx electron-builder --mac dmg zip --publish always
+
+      - name: Package only (manual / no publish)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'true'
+        run: npx electron-builder --mac dmg zip --publish never
+
+      - name: Manual publish (workflow_dispatch + publish=true)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == 'true'
+        run: npx electron-builder --mac dmg zip --publish always
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironwood-planner-mac
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
+          if-no-files-found: warn
+          retention-days: 14

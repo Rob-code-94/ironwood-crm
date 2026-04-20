@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useEffect, useMemo, useState } from "react"
+import { startTransition, Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -56,7 +56,7 @@ function parseLocalDateParam(value: string | null): Date | undefined {
   return dt
 }
 
-export default function CalendarPage() {
+function CalendarPageContent() {
   const searchParams = useSearchParams()
   const { tasks, calendarEvents, addCalendarEvent, deleteCalendarEvent } = useWorkspace()
   const dateFromQuery = searchParams.get("date")
@@ -413,5 +413,19 @@ export default function CalendarPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function CalendarPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center p-8 text-muted-foreground">
+          Loading calendar…
+        </div>
+      }
+    >
+      <CalendarPageContent />
+    </Suspense>
   )
 }

@@ -1,3 +1,4 @@
+import { DesktopUpdateCard } from "@/components/desktop-update-card"
 import { PlannerSettingsCard } from "@/components/planner-settings-card"
 import { WorkspaceRepairCard } from "@/components/workspace-repair-card"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,6 +26,8 @@ export default function SettingsPage() {
       </div>
 
       <PlannerSettingsCard />
+
+      <DesktopUpdateCard />
 
       <WorkspaceRepairCard />
 

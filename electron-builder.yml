@@ -1,0 +1,71 @@
+# electron-builder configuration for Ironwood Planner desktop app.
+# Mirrors the architecture in `electron/main.cjs`: ship Electron + a tiny set of
+# JS files, and place the prebuilt Next standalone server under
+# `<resourcesPath>/server/` via `extraResources`.
+
+appId: com.ironwood.planner
+productName: Ironwood Planner
+asar: true
+directories:
+  output: dist
+  buildResources: electron/assets
+
+# Only include the Electron main / preload / helpers in the asar archive.
+# `node_modules` are pruned automatically; the heavy Next runtime lives under
+# `extraResources` so it isn't double-shipped inside the archive.
+files:
+  - "electron/**/*"
+  - "package.json"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/.cache"
+
+# Bundled Next standalone server prepared by scripts/copy-electron-bundle.mjs.
+extraResources:
+  - from: electron/build/server
+    to: server
+    filter:
+      - "**/*"
+  - from: electron/server-env.example.json
+    to: server-env.example.json
+
+mac:
+  category: public.app-category.productivity
+  icon: electron/assets/icon.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+# Classic “drag app → Applications” install window when users open the .dmg.
+# (The .zip release is for auto-updates / CI; recommend the DMG for manual installs.)
+dmg:
+  title: ${productName} ${version}
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  window:
+    width: 660
+    height: 420
+  contents:
+    # App bundle (implicit first entry = the built .app)
+    - x: 192
+      y: 240
+    # Finder alias to /Applications so users can drop the app there
+    - x: 468
+      y: 240
+      type: link
+      path: /Applications
+
+# Update channel: GitHub Releases by default. Override at build time by
+# exporting GH_TOKEN and pushing a `v*` tag, or swap to `provider: generic`
+# with a static HTTPS URL hosted alongside your marketing site.
+publish:
+  provider: github
+  owner: Rob-code-94
+  repo: ironwood-crm
+  releaseType: release

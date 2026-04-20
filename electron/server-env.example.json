@@ -1,0 +1,6 @@
+{
+  "_readme": "Save a copy as server-env.json in the same folder as Help → Open workspace sync folder. Use the same FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY as your hosted deployment (e.g. Vercel). Private key must use \\n for newlines inside the JSON string. Restart the desktop app after saving.",
+  "FIREBASE_PROJECT_ID": "",
+  "FIREBASE_CLIENT_EMAIL": "",
+  "FIREBASE_PRIVATE_KEY": ""
+}

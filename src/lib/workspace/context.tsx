@@ -39,12 +39,20 @@ import {
   seedTasks,
 } from "@/lib/workspace/seed"
 import {
+  initWorkspaceStorage,
   isWorkspaceFileSyncEnabled,
-  loadWorkspaceSnapshot,
+  loadWorkspaceSnapshotAsync,
   normalizeWorkspaceSnapshot,
-  saveWorkspaceSnapshot,
+  saveWorkspaceSnapshotAsync,
   type WorkspaceSnapshotV1,
 } from "@/lib/workspace/persist"
+import {
+  clearWorkspacePutOutbox,
+  enqueueWorkspacePutOutbox,
+  flushWorkspacePutOutbox,
+  readWorkspacePutOutbox,
+  type WorkspaceRemoteSyncState,
+} from "@/lib/workspace/workspace-remote-sync"
 import { repairMissingProjectsFromRefs } from "@/lib/workspace/repair-missing-projects"
 import { wouldDestructiveOverwriteReject } from "@/lib/workspace/workspace-snapshot-guards"
 import { isoDateAddDays, toIsoDateLocal } from "@/lib/due-date-utils"
@@ -140,8 +148,12 @@ type WorkspaceContextValue = {
   projectNameById: (id: string | undefined) => string | undefined
   addDocument: (doc: Omit<Document, "id">) => Document
   deleteDocument: (id: string) => void
-  /** True while waiting for the first remote workspace load when cloud sync is enabled. */
+  /** True until local IndexedDB (and remote snapshot when sync is on) has been applied. */
   workspaceRemoteLoading: boolean
+  /** Cloud PUT status: idle, syncing, offline/pending outbox, or last error. */
+  workspaceSyncState: WorkspaceRemoteSyncState
+  /** Retry flushing the workspace snapshot to the server (e.g. after fixing network). */
+  retryWorkspaceRemoteSync: () => void
   /** Infer missing `Project` rows from task/document `projectId` refs (then persists). */
   repairWorkspaceFromRefs: () => void
 }
@@ -173,9 +185,8 @@ function serverVersionFromSnapshot(s: WorkspaceSnapshotV1): number | null {
   return has ? 0 : null
 }
 
-function readLocalWorkspaceOrSeed(): WorkspaceSnapshotV1 {
-  const s = loadWorkspaceSnapshot()
-  if (s) return s
+function workspaceFromLocalOrSeed(local: WorkspaceSnapshotV1 | null): WorkspaceSnapshotV1 {
+  if (local) return local
   return {
     version: 1,
     projects: [...seedProjects],
@@ -221,14 +232,6 @@ function emptySyncWorkspace(): WorkspaceSnapshotV1 {
     notifications: [],
     persistedAt: undefined,
   }
-}
-
-function getInitialWorkspaceSnapshot(): WorkspaceSnapshotV1 {
-  if (typeof window === "undefined") {
-    return isWorkspaceFileSyncEnabled() ? emptySyncWorkspace() : readLocalWorkspaceOrSeed()
-  }
-  if (!isWorkspaceFileSyncEnabled()) return readLocalWorkspaceOrSeed()
-  return emptySyncWorkspace()
 }
 
 type WorkspaceStateSetters = {
@@ -282,29 +285,27 @@ function applySnapshotToSetters(
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [initialSnapshot] = useState(() => getInitialWorkspaceSnapshot())
-  const [workspaceHydrated, setWorkspaceHydrated] = useState(
-    () => !isWorkspaceFileSyncEnabled()
-  )
+  const bootstrap = emptySyncWorkspace()
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false)
+  const [workspaceSyncState, setWorkspaceSyncState] =
+    useState<WorkspaceRemoteSyncState>("idle")
   const lastServerPersistedAtRef = useRef<number | null>(null)
   const lastServerSnapshotForGuardRef = useRef<WorkspaceSnapshotV1 | null>(null)
 
-  const [projects, setProjects] = useState(initialSnapshot.projects)
-  const [tasks, setTasks] = useState(initialSnapshot.tasks)
-  const [contacts, setContacts] = useState(initialSnapshot.contacts)
-  const [companies, setCompanies] = useState(initialSnapshot.companies)
-  const [deals, setDeals] = useState(initialSnapshot.deals)
-  const [savedChatTurns, setSavedChatTurns] = useState(initialSnapshot.savedChatTurns)
-  const [documents, setDocuments] = useState(() => initialSnapshot.documents ?? [])
-  const [calendarEvents, setCalendarEvents] = useState(
-    () => initialSnapshot.calendarEvents ?? []
+  const [projects, setProjects] = useState(bootstrap.projects)
+  const [tasks, setTasks] = useState(bootstrap.tasks)
+  const [contacts, setContacts] = useState(bootstrap.contacts)
+  const [companies, setCompanies] = useState(bootstrap.companies)
+  const [deals, setDeals] = useState(bootstrap.deals)
+  const [savedChatTurns, setSavedChatTurns] = useState(bootstrap.savedChatTurns)
+  const [documents, setDocuments] = useState(() => bootstrap.documents ?? [])
+  const [calendarEvents, setCalendarEvents] = useState(() => bootstrap.calendarEvents ?? [])
+  const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<number | null>(
+    () => bootstrap.taskDefaultDueOffsetDays ?? null
   )
-  const [taskDefaultDueOffsetDays, setTaskDefaultDueOffsetDays] = useState<
-    number | null
-  >(() => initialSnapshot.taskDefaultDueOffsetDays ?? null)
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
     () =>
-      initialSnapshot.notificationPreferences ?? {
+      bootstrap.notificationPreferences ?? {
         inAppEnabled: true,
         pushEnabled: false,
         defaultReminderMinutesBefore: 60,
@@ -312,10 +313,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
   )
   const [notifications, setNotifications] = useState<PlannerNotification[]>(
-    () => initialSnapshot.notifications ?? []
+    () => bootstrap.notifications ?? []
   )
   const [selectedProjectFilterId, setSelectedProjectFilterId] = useState(
-    () => initialSnapshot.selectedProjectFilterId
+    () => bootstrap.selectedProjectFilterId
   )
 
   const workspaceSetters: WorkspaceStateSetters = useMemo(
@@ -362,17 +363,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   useEffect(() => {
-    if (!isWorkspaceFileSyncEnabled()) return
     let cancelled = false
 
     void (async () => {
+      await initWorkspaceStorage()
+      const loadedLocal = await loadWorkspaceSnapshotAsync()
+      if (cancelled) return
+
+      if (!isWorkspaceFileSyncEnabled()) {
+        startTransition(() => {
+          if (cancelled) return
+          applySnapshotToSetters(
+            workspaceFromLocalOrSeed(loadedLocal),
+            workspaceSetters,
+            lastServerPersistedAtRef,
+            lastServerSnapshotForGuardRef
+          )
+          setWorkspaceHydrated(true)
+        })
+        return
+      }
+
       const res = await fetch("/api/workspace/snapshot")
       if (cancelled) return
 
       const finishWithLocalFallback = () => {
         startTransition(() => {
           if (cancelled) return
-          const local = loadWorkspaceSnapshot()
+          const local = loadedLocal
           if (local)
             applySnapshotToSetters(
               local,
@@ -411,7 +429,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      const localSnap = loadWorkspaceSnapshot()
+      const localSnap = loadedLocal
       const localPersistedAt = localSnap?.persistedAt ?? 0
       const remoteT = remote.persistedAt ?? 0
       const localHasData =
@@ -503,10 +521,92 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     })
   }, [tasks, documents])
 
-  const workspaceRemoteLoading = isWorkspaceFileSyncEnabled() && !workspaceHydrated
+  const workspaceRemoteLoading = !workspaceHydrated
+
+  const retryWorkspaceRemoteSync = useCallback(() => {
+    if (!isWorkspaceFileSyncEnabled()) return
+    void (async () => {
+      setWorkspaceSyncState("syncing")
+      const result = await flushWorkspacePutOutbox((remote) => {
+        startTransition(() => applyRemoteSnapshot(remote))
+      })
+      if (result.ok) {
+        if (result.snapshot) {
+          const persisted = result.snapshot.persistedAt ?? Date.now()
+          lastServerPersistedAtRef.current = persisted
+          lastServerSnapshotForGuardRef.current = { ...result.snapshot, persistedAt: persisted }
+        }
+        setWorkspaceSyncState("idle")
+        return
+      }
+      if (result.kind === "conflict") {
+        toast.info("Workspace was updated elsewhere. Loading the latest data…")
+        setWorkspaceSyncState("idle")
+        return
+      }
+      if (result.kind === "destructive" || result.kind === "validation") {
+        if (result.message) toast.error(result.message)
+        setWorkspaceSyncState("idle")
+        return
+      }
+      setWorkspaceSyncState(typeof navigator !== "undefined" && navigator.onLine ? "error" : "pending")
+    })()
+  }, [applyRemoteSnapshot])
 
   useEffect(() => {
-    if (isWorkspaceFileSyncEnabled() && !workspaceHydrated) return
+    if (!workspaceHydrated || !isWorkspaceFileSyncEnabled()) return
+
+    const maybeFlush = () => {
+      void (async () => {
+        const pending = await readWorkspacePutOutbox()
+        if (!pending || (typeof navigator !== "undefined" && !navigator.onLine)) return
+        setWorkspaceSyncState("syncing")
+        const result = await flushWorkspacePutOutbox((remote) => {
+          startTransition(() => applyRemoteSnapshot(remote))
+        })
+        if (result.ok) {
+          if (result.snapshot) {
+            const persisted = result.snapshot.persistedAt ?? Date.now()
+            lastServerPersistedAtRef.current = persisted
+            lastServerSnapshotForGuardRef.current = { ...result.snapshot, persistedAt: persisted }
+          }
+          setWorkspaceSyncState("idle")
+          return
+        }
+        if (result.kind === "conflict") {
+          toast.info("Workspace was updated elsewhere. Loading the latest data…")
+          setWorkspaceSyncState("idle")
+          return
+        }
+        if (result.kind === "destructive" || result.kind === "validation") {
+          if (result.message) toast.error(result.message)
+          setWorkspaceSyncState("idle")
+          return
+        }
+        setWorkspaceSyncState(typeof navigator !== "undefined" && navigator.onLine ? "error" : "pending")
+      })()
+    }
+
+    const onOnline = () => maybeFlush()
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") maybeFlush()
+    }
+    window.addEventListener("online", onOnline)
+    document.addEventListener("visibilitychange", onVis)
+    const interval = window.setInterval(() => {
+      void readWorkspacePutOutbox().then((p) => {
+        if (p && typeof navigator !== "undefined" && navigator.onLine) maybeFlush()
+      })
+    }, 60_000)
+    return () => {
+      window.removeEventListener("online", onOnline)
+      document.removeEventListener("visibilitychange", onVis)
+      window.clearInterval(interval)
+    }
+  }, [workspaceHydrated, applyRemoteSnapshot])
+
+  useEffect(() => {
+    if (!workspaceHydrated) return
 
     const snapshot: WorkspaceSnapshotV1 = {
       version: 1,
@@ -525,10 +625,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       persistedAt: Date.now(),
     }
     const t = window.setTimeout(() => {
-      saveWorkspaceSnapshot(snapshot)
-      if (!isWorkspaceFileSyncEnabled()) return
-
       void (async () => {
+        await saveWorkspaceSnapshotAsync(snapshot)
+        if (!isWorkspaceFileSyncEnabled()) return
+
         const basis = lastServerSnapshotForGuardRef.current
         if (basis && wouldDestructiveOverwriteReject(basis, snapshot)) {
           toast.error(
@@ -537,67 +637,93 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const res = await fetch("/api/workspace/snapshot", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            expectedPersistedAt: lastServerPersistedAtRef.current,
-            snapshot,
-          }),
-        })
-        if (res.status === 409) {
-          toast.info("Workspace was updated elsewhere. Loading the latest data…")
-          const g = await fetch("/api/workspace/snapshot")
-          if (!g.ok) return
-          try {
-            const raw = await g.json()
-            const latest = normalizeWorkspaceSnapshot(raw)
-            if (latest) {
-              startTransition(() => {
-                applyRemoteSnapshot(latest)
-              })
+        setWorkspaceSyncState("syncing")
+        try {
+          const res = await fetch("/api/workspace/snapshot", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedPersistedAt: lastServerPersistedAtRef.current,
+              snapshot,
+            }),
+          })
+          if (res.status === 409) {
+            await clearWorkspacePutOutbox()
+            toast.info("Workspace was updated elsewhere. Loading the latest data…")
+            const g = await fetch("/api/workspace/snapshot")
+            if (!g.ok) {
+              setWorkspaceSyncState("error")
+              return
             }
-          } catch {
-            /* ignore */
-          }
-          return
-        }
-        if (res.status === 422) {
-          let payload: { destructive?: boolean; error?: string } = {}
-          try {
-            payload = (await res.json()) as typeof payload
-          } catch {
-            /* ignore */
-          }
-          if (payload.destructive) {
-            toast.error(
-              payload.error ?? "Save blocked so your workspace data is not wiped by mistake."
-            )
-          } else if (payload.error) {
-            toast.error(payload.error)
-          }
-          const g = await fetch("/api/workspace/snapshot")
-          if (!g.ok) return
-          try {
-            const raw = await g.json()
-            const latest = normalizeWorkspaceSnapshot(raw)
-            if (latest) {
-              startTransition(() => {
-                applyRemoteSnapshot(latest)
-              })
+            try {
+              const raw = await g.json()
+              const latest = normalizeWorkspaceSnapshot(raw)
+              if (latest) {
+                startTransition(() => {
+                  applyRemoteSnapshot(latest)
+                })
+              }
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
+            setWorkspaceSyncState("idle")
+            return
           }
-          return
-        }
-        if (res.ok) {
-          const persisted =
-            typeof snapshot.persistedAt === "number" && Number.isFinite(snapshot.persistedAt)
-              ? snapshot.persistedAt
-              : Date.now()
-          lastServerPersistedAtRef.current = persisted
-          lastServerSnapshotForGuardRef.current = { ...snapshot, persistedAt: persisted }
+          if (res.status === 422) {
+            await clearWorkspacePutOutbox()
+            let payload: { destructive?: boolean; error?: string } = {}
+            try {
+              payload = (await res.json()) as typeof payload
+            } catch {
+              /* ignore */
+            }
+            if (payload.destructive) {
+              toast.error(
+                payload.error ?? "Save blocked so your workspace data is not wiped by mistake."
+              )
+            } else if (payload.error) {
+              toast.error(payload.error)
+            }
+            const g = await fetch("/api/workspace/snapshot")
+            if (!g.ok) {
+              setWorkspaceSyncState("error")
+              return
+            }
+            try {
+              const raw = await g.json()
+              const latest = normalizeWorkspaceSnapshot(raw)
+              if (latest) {
+                startTransition(() => {
+                  applyRemoteSnapshot(latest)
+                })
+              }
+            } catch {
+              /* ignore */
+            }
+            setWorkspaceSyncState("idle")
+            return
+          }
+          if (res.ok) {
+            await clearWorkspacePutOutbox()
+            const persisted =
+              typeof snapshot.persistedAt === "number" && Number.isFinite(snapshot.persistedAt)
+                ? snapshot.persistedAt
+                : Date.now()
+            lastServerPersistedAtRef.current = persisted
+            lastServerSnapshotForGuardRef.current = { ...snapshot, persistedAt: persisted }
+            setWorkspaceSyncState("idle")
+            return
+          }
+
+          await enqueueWorkspacePutOutbox(snapshot, lastServerPersistedAtRef.current)
+          setWorkspaceSyncState(
+            typeof navigator !== "undefined" && navigator.onLine ? "error" : "pending"
+          )
+        } catch {
+          await enqueueWorkspacePutOutbox(snapshot, lastServerPersistedAtRef.current)
+          setWorkspaceSyncState(
+            typeof navigator !== "undefined" && navigator.onLine ? "error" : "pending"
+          )
         }
       })()
     }, 400)
@@ -1066,6 +1192,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       addDocument,
       deleteDocument,
       workspaceRemoteLoading,
+      workspaceSyncState,
+      retryWorkspaceRemoteSync,
       repairWorkspaceFromRefs,
     }),
     [
@@ -1087,6 +1215,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       dismissNotification,
       snoozeNotification,
       workspaceRemoteLoading,
+      workspaceSyncState,
+      retryWorkspaceRemoteSync,
       repairWorkspaceFromRefs,
       addProject,
       updateProject,

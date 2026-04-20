@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,7 +19,11 @@ import {
   type Agent,
 } from "@/lib/agents"
 import { DEFAULT_CRM_MODEL, type CrmAiModelId } from "@/lib/crm-ai-settings"
-import { CRM_ASSISTANT_THREAD_STORAGE_KEY } from "@/lib/crm-assistant-storage"
+import {
+  clearAssistantThreadStorageAsync,
+  getAssistantThreadExportAsync,
+  initCrmAssistantIdb,
+} from "@/lib/crm-assistant-idb"
 import { Bot, PlusCircle, Trash2, Pencil, CheckCircle, MessageSquare, Sparkles, Key } from "lucide-react"
 import { toast } from "sonner"
 
@@ -27,20 +31,26 @@ type SimpleChatMessage = { role: "user" | "assistant"; content: string }
 type StoredThread = { messages?: SimpleChatMessage[] }
 
 function ThreadSection() {
-  const [history, setHistory] = useState<SimpleChatMessage[]>(() => {
-    if (typeof window === "undefined") return []
-    try {
-      const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
-      if (!raw) return []
-      const parsed = JSON.parse(raw) as StoredThread
-      return (parsed.messages ?? [])
-        .filter((msg): msg is SimpleChatMessage => msg && typeof msg.content === "string")
-        .slice(-10)
-        .reverse()
-    } catch {
-      return []
-    }
-  })
+  const [history, setHistory] = useState<SimpleChatMessage[]>([])
+
+  useEffect(() => {
+    void (async () => {
+      await initCrmAssistantIdb()
+      const raw = await getAssistantThreadExportAsync()
+      if (!raw) return
+      try {
+        const parsed = JSON.parse(raw) as StoredThread
+        setHistory(
+          (parsed.messages ?? [])
+            .filter((msg): msg is SimpleChatMessage => msg && typeof msg.content === "string")
+            .slice(-10)
+            .reverse()
+        )
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, [])
 
   return (
     <Card>
@@ -54,11 +64,11 @@ function ThreadSection() {
         <Button
           variant="outline"
           onClick={() => {
-            try {
-              localStorage.removeItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
-            } catch {}
-            setHistory([])
-            toast.success("Thread cleared")
+            void (async () => {
+              await clearAssistantThreadStorageAsync()
+              setHistory([])
+              toast.success("Thread cleared")
+            })()
           }}
         >
           New Thread

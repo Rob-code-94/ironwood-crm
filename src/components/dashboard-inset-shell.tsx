@@ -2,9 +2,11 @@
 
 import { type ReactNode } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
+import { ElectronNotificationBridge } from "@/components/electron-notification-bridge"
 import { MobileNav } from "@/components/mobile-nav"
 import { NotificationBell } from "@/components/notification-bell"
 import { NotificationPushBridge } from "@/components/notification-push-bridge"
+import { OnlineStatusBanner } from "@/components/online-status-banner"
 import { TaskLineupBar } from "@/components/task-lineup-bar"
 import { ThemeSwitcher } from "@/components/theme-switcher"
 import {
@@ -38,8 +40,10 @@ export function DashboardInsetShell({
     >
       <AppSidebar variant="inset" className="hidden md:flex" />
       <NotificationPushBridge />
+      <ElectronNotificationBridge />
       <SidebarInset className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <OnlineStatusBanner />
           <TaskLineupBar />
           <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)]">
             <div className="flex min-w-0 items-center gap-2">

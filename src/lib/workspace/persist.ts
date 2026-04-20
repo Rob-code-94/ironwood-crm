@@ -10,6 +10,11 @@ import type {
   SavedChatTurn,
   Task,
 } from "@/lib/types"
+import {
+  getIronwoodDb,
+  idbGetWorkspaceSnapshot,
+  idbSetWorkspaceSnapshot,
+} from "@/lib/workspace/storage/ironwood-idb"
 
 export const WORKSPACE_STORAGE_KEY = "ironwood_workspace_v1"
 
@@ -128,6 +133,45 @@ export function normalizeWorkspaceSnapshot(data: unknown): WorkspaceSnapshotV1 |
   }
 }
 
+let initWorkspaceStoragePromise: Promise<void> | null = null
+
+/** One-time: open IndexedDB, migrate legacy localStorage snapshot into IDB, then drop the legacy key. */
+export function initWorkspaceStorage(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve()
+  if (!initWorkspaceStoragePromise) {
+    initWorkspaceStoragePromise = (async () => {
+      try {
+        await getIronwoodDb()
+        const existing = await idbGetWorkspaceSnapshot()
+        if (existing) {
+          try {
+            localStorage.removeItem(WORKSPACE_STORAGE_KEY)
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+        const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY)
+        if (raw) {
+          const parsed = normalizeWorkspaceSnapshot(JSON.parse(raw) as unknown)
+          if (parsed) {
+            await idbSetWorkspaceSnapshot(parsed)
+          }
+          try {
+            localStorage.removeItem(WORKSPACE_STORAGE_KEY)
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* IDB unavailable — legacy localStorage remains */
+      }
+    })()
+  }
+  return initWorkspaceStoragePromise
+}
+
+/** Prefer {@link loadWorkspaceSnapshotAsync}. Sync read from legacy localStorage only (migration or IDB blocked). */
 export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
   if (typeof window === "undefined") return null
   try {
@@ -139,11 +183,33 @@ export function loadWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
   }
 }
 
+export async function loadWorkspaceSnapshotAsync(): Promise<WorkspaceSnapshotV1 | null> {
+  if (typeof window === "undefined") return null
+  await initWorkspaceStorage()
+  try {
+    const fromIdb = await idbGetWorkspaceSnapshot()
+    if (fromIdb) return fromIdb
+  } catch {
+    /* fall through */
+  }
+  return loadWorkspaceSnapshot()
+}
+
 export function saveWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1) {
   if (typeof window === "undefined") return
+  void saveWorkspaceSnapshotAsync(snapshot)
+}
+
+export async function saveWorkspaceSnapshotAsync(snapshot: WorkspaceSnapshotV1): Promise<void> {
+  if (typeof window === "undefined") return
+  await initWorkspaceStorage()
   try {
-    localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot))
+    await idbSetWorkspaceSnapshot(snapshot)
   } catch {
-    /* quota / private mode */
+    try {
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot))
+    } catch {
+      /* quota / private mode */
+    }
   }
 }

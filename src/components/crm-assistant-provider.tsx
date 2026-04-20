@@ -19,16 +19,20 @@ import {
   useLocalRuntime,
 } from "@assistant-ui/react"
 import type { ExportedMessageRepository } from "@assistant-ui/core"
+import type { SavedThread } from "@/lib/crm-assistant-storage"
 import {
-  CRM_ASSISTANT_THREAD_STORAGE_KEY,
-  CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY,
-  clearCrmAssistantThreadStorage,
-  getSavedThreads,
-  addSavedThread,
-  deleteSavedThread,
-  updateSavedThread,
-  type SavedThread,
-} from "@/lib/crm-assistant-storage"
+  addSavedThreadAsync,
+  clearAssistantThreadStorageAsync,
+  deleteSavedThreadAsync,
+  getActiveRemoteThreadIdAsync,
+  getAssistantThreadExportAsync,
+  getSavedThreadsAsync,
+  initCrmAssistantIdb,
+  setActiveRemoteThreadIdAsync,
+  setAssistantThreadExportAsync,
+  updateSavedThreadAsync,
+} from "@/lib/crm-assistant-idb"
+import { flushCrmAssistantRemoteQueue, enqueueAssistantPatch } from "@/lib/crm-assistant-remote-queue"
 import { isWorkspaceFileSyncEnabled } from "@/lib/workspace/persist"
 import {
   FallbackDocumentAttachmentAdapter,
@@ -61,12 +65,13 @@ function threadTitle(exported: ExportedMessageRepository): string {
 /** One-time: push legacy localStorage thread list into Firestore when cloud is empty */
 async function migrateLegacyAssistantThreadsToFirestore(): Promise<void> {
   try {
+    await initCrmAssistantIdb()
     const listRes = await fetch("/api/assistant/threads")
     if (!listRes.ok) return
     const listJson = (await listRes.json()) as { threads?: unknown[] }
     if ((listJson.threads?.length ?? 0) > 0) return
 
-    const legacySaved = getSavedThreads()
+    const legacySaved = await getSavedThreadsAsync()
     for (const s of [...legacySaved].reverse()) {
       const cre = await fetch("/api/assistant/threads", { method: "POST" })
       if (!cre.ok) continue
@@ -232,15 +237,30 @@ The user must confirm before any task or project is saved. Prefer **General** wh
     adapters: { attachments },
   })
 
-  const [savedThreads, setSavedThreads] = useState<SavedThread[]>(() =>
-    isWorkspaceFileSyncEnabled() ? [] : getSavedThreads()
-  )
+  const [savedThreads, setSavedThreads] = useState<SavedThread[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const run = () => {
+      void flushCrmAssistantRemoteQueue()
+    }
+    window.addEventListener("online", run)
+    const onVis = () => {
+      if (document.visibilityState === "visible") run()
+    }
+    document.addEventListener("visibilitychange", onVis)
+    return () => {
+      window.removeEventListener("online", run)
+      document.removeEventListener("visibilitychange", onVis)
+    }
+  }, [])
 
   const refreshThreadList = useCallback(async () => {
     if (!isWorkspaceFileSyncEnabled()) {
+      await initCrmAssistantIdb()
+      const list = await getSavedThreadsAsync()
       startTransition(() => {
-        setSavedThreads(getSavedThreads())
+        setSavedThreads(list)
       })
       return
     }
@@ -284,33 +304,43 @@ The user must confirm before any task or project is saved. Prefer **General** wh
       unsub = thread.subscribe(() => {
         clearTimeout(debounce)
         debounce = setTimeout(() => {
-          try {
+          void (async () => {
+            try {
+              const exported = thread.export()
+              await initCrmAssistantIdb()
+              await setAssistantThreadExportAsync(JSON.stringify(exported))
+            } catch {
+              /* quota / private mode */
+            }
+            if (!isWorkspaceFileSyncEnabled()) return
+            const remoteId = await getActiveRemoteThreadIdAsync()
+            if (!remoteId) return
             const exported = thread.export()
-            localStorage.setItem(
-              CRM_ASSISTANT_THREAD_STORAGE_KEY,
-              JSON.stringify(exported)
-            )
-          } catch {
-            /* quota / private mode */
-          }
-          if (!isWorkspaceFileSyncEnabled()) return
-          const remoteId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
-          if (!remoteId) return
-          const exported = thread.export()
-          void fetch(`/api/assistant/threads/${remoteId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ repository: exported }),
-          }).catch(() => {})
+            try {
+              const res = await fetch(`/api/assistant/threads/${remoteId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ repository: exported }),
+              })
+              if (!res.ok) {
+                await enqueueAssistantPatch(remoteId, { repository: exported })
+              }
+            } catch {
+              await enqueueAssistantPatch(remoteId, { repository: exported })
+            }
+          })()
         }, 800)
       })
     }
 
     void (async () => {
+      await initCrmAssistantIdb()
       if (!isWorkspaceFileSyncEnabled()) {
+        const list = await getSavedThreadsAsync()
+        startTransition(() => setSavedThreads(list))
         if (!loadedRef.current) {
           loadedRef.current = true
-          const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          const raw = await getAssistantThreadExportAsync()
           if (raw) {
             try {
               const data = JSON.parse(raw) as ExportedMessageRepository
@@ -331,12 +361,12 @@ The user must confirm before any task or project is saved. Prefer **General** wh
       await refreshThreadList()
       if (cancelled) return
 
-      let activeId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+      let activeId = await getActiveRemoteThreadIdAsync()
       const listRes = await fetch("/api/assistant/threads")
       if (!listRes.ok) {
         if (!loadedRef.current) {
           loadedRef.current = true
-          const raw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          const raw = await getAssistantThreadExportAsync()
           if (raw) {
             try {
               const data = JSON.parse(raw) as ExportedMessageRepository
@@ -368,7 +398,7 @@ The user must confirm before any task or project is saved. Prefer **General** wh
         }
         activeId = nextId
         if (activeId) {
-          localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, activeId)
+          await setActiveRemoteThreadIdAsync(activeId)
         }
       }
       if (!cancelled && activeId) {
@@ -400,7 +430,7 @@ The user must confirm before any task or project is saved. Prefer **General** wh
           }
         }
         if (!imported) {
-          const legacyRaw = localStorage.getItem(CRM_ASSISTANT_THREAD_STORAGE_KEY)
+          const legacyRaw = await getAssistantThreadExportAsync()
           if (legacyRaw) {
             try {
               const data = JSON.parse(legacyRaw) as ExportedMessageRepository
@@ -440,50 +470,48 @@ The user must confirm before any task or project is saved. Prefer **General** wh
   const loadThread = useCallback(
     async (id: string) => {
       if (!isWorkspaceFileSyncEnabled()) {
-        const threads = getSavedThreads()
+        const threads = await getSavedThreadsAsync()
         const found = threads.find((t) => t.id === id)
         if (!found) return
-        clearCrmAssistantThreadStorage()
+        await clearAssistantThreadStorageAsync()
         runtime.thread.reset()
         setTimeout(() => {
-          try {
-            runtime.thread.import(found.data as ExportedMessageRepository)
-            localStorage.setItem(
-              CRM_ASSISTANT_THREAD_STORAGE_KEY,
-              JSON.stringify(found.data)
-            )
-          } catch {
-            /* ignore */
-          }
+          void (async () => {
+            try {
+              runtime.thread.import(found.data as ExportedMessageRepository)
+              await setAssistantThreadExportAsync(JSON.stringify(found.data))
+            } catch {
+              /* ignore */
+            }
+          })()
         }, 50)
         setActiveThreadId(found.id)
         return
       }
 
-      clearCrmAssistantThreadStorage()
+      await clearAssistantThreadStorageAsync()
       runtime.thread.reset()
-      localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, id)
+      await setActiveRemoteThreadIdAsync(id)
       setActiveThreadId(id)
       const r = await fetch(`/api/assistant/threads/${id}`)
       if (!r.ok) return
       const body = (await r.json()) as { repository?: unknown }
       setTimeout(() => {
-        try {
-          const repo = body.repository
-          if (
-            repo &&
-            typeof repo === "object" &&
-            Array.isArray((repo as { messages?: unknown }).messages)
-          ) {
-            runtime.thread.import(repo as ExportedMessageRepository)
-            localStorage.setItem(
-              CRM_ASSISTANT_THREAD_STORAGE_KEY,
-              JSON.stringify(repo)
-            )
+        void (async () => {
+          try {
+            const repo = body.repository
+            if (
+              repo &&
+              typeof repo === "object" &&
+              Array.isArray((repo as { messages?: unknown }).messages)
+            ) {
+              runtime.thread.import(repo as ExportedMessageRepository)
+              await setAssistantThreadExportAsync(JSON.stringify(repo))
+            }
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
-        }
+        })()
       }, 50)
     },
     [runtime]
@@ -491,7 +519,7 @@ The user must confirm before any task or project is saved. Prefer **General** wh
 
   const ensureActiveRemoteThreadAfterRemoval = useCallback(
     async (removedId: string) => {
-      const active = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+      const active = await getActiveRemoteThreadIdAsync()
       if (active !== removedId) {
         await refreshThreadList()
         return
@@ -513,9 +541,9 @@ The user must confirm before any task or project is saved. Prefer **General** wh
       if (nextId) {
         await loadThread(nextId)
       } else {
-        localStorage.removeItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+        await setActiveRemoteThreadIdAsync(null)
         setActiveThreadId(null)
-        clearCrmAssistantThreadStorage()
+        await clearAssistantThreadStorageAsync()
         runtime.thread.reset()
       }
       await refreshThreadList()
@@ -524,21 +552,30 @@ The user must confirm before any task or project is saved. Prefer **General** wh
   )
 
   const resetThread = useCallback(() => {
-    clearCrmAssistantThreadStorage()
-    runtime.thread.reset()
-    if (isWorkspaceFileSyncEnabled()) {
-      const id = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
-      if (id) {
-        const empty = runtime.thread.export()
-        void fetch(`/api/assistant/threads/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repository: empty }),
-        }).catch(() => {})
+    void (async () => {
+      await clearAssistantThreadStorageAsync()
+      runtime.thread.reset()
+      if (isWorkspaceFileSyncEnabled()) {
+        const id = await getActiveRemoteThreadIdAsync()
+        if (id) {
+          const empty = runtime.thread.export()
+          try {
+            const res = await fetch(`/api/assistant/threads/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ repository: empty }),
+            })
+            if (!res.ok) {
+              await enqueueAssistantPatch(id, { repository: empty })
+            }
+          } catch {
+            await enqueueAssistantPatch(id, { repository: empty })
+          }
+        }
+      } else {
+        setActiveThreadId(null)
       }
-    } else {
-      setActiveThreadId(null)
-    }
+    })()
   }, [runtime])
 
   const saveAndNewThread = useCallback(async () => {
@@ -553,29 +590,36 @@ The user must confirm before any task or project is saved. Prefer **General** wh
           status: "active",
           data: exported,
         }
-        addSavedThread(saved)
-        setSavedThreads(getSavedThreads())
+        await addSavedThreadAsync(saved)
+        setSavedThreads(await getSavedThreadsAsync())
       }
-      clearCrmAssistantThreadStorage()
+      await clearAssistantThreadStorageAsync()
       runtime.thread.reset()
       setActiveThreadId(null)
       return
     }
 
-    const currentId = localStorage.getItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY)
+    const currentId = await getActiveRemoteThreadIdAsync()
     const exported = runtime.thread.export()
     if (currentId) {
-      await fetch(`/api/assistant/threads/${currentId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repository: exported }),
-      }).catch(() => {})
+      try {
+        const res = await fetch(`/api/assistant/threads/${currentId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repository: exported }),
+        })
+        if (!res.ok) {
+          await enqueueAssistantPatch(currentId, { repository: exported })
+        }
+      } catch {
+        await enqueueAssistantPatch(currentId, { repository: exported })
+      }
     }
     const cre = await fetch("/api/assistant/threads", { method: "POST" })
     if (!cre.ok) return
     const { remoteId } = (await cre.json()) as { remoteId: string }
-    localStorage.setItem(CRM_ASSISTANT_ACTIVE_REMOTE_THREAD_KEY, remoteId)
-    clearCrmAssistantThreadStorage()
+    await setActiveRemoteThreadIdAsync(remoteId)
+    await clearAssistantThreadStorageAsync()
     runtime.thread.reset()
     setActiveThreadId(remoteId)
     await refreshThreadList()
@@ -586,15 +630,22 @@ The user must confirm before any task or project is saved. Prefer **General** wh
       const trimmed = title.trim()
       if (!trimmed) return
       if (!isWorkspaceFileSyncEnabled()) {
-        updateSavedThread(id, { title: trimmed })
-        setSavedThreads(getSavedThreads())
+        await updateSavedThreadAsync(id, { title: trimmed })
+        setSavedThreads(await getSavedThreadsAsync())
         return
       }
-      await fetch(`/api/assistant/threads/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: trimmed }),
-      })
+      try {
+        const res = await fetch(`/api/assistant/threads/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: trimmed }),
+        })
+        if (!res.ok) {
+          await enqueueAssistantPatch(id, { title: trimmed })
+        }
+      } catch {
+        await enqueueAssistantPatch(id, { title: trimmed })
+      }
       await refreshThreadList()
     },
     [refreshThreadList]
@@ -603,16 +654,23 @@ The user must confirm before any task or project is saved. Prefer **General** wh
   const archiveThread = useCallback(
     async (id: string) => {
       if (!isWorkspaceFileSyncEnabled()) {
-        updateSavedThread(id, { status: "archived" })
-        setSavedThreads(getSavedThreads())
+        await updateSavedThreadAsync(id, { status: "archived" })
+        setSavedThreads(await getSavedThreadsAsync())
         setActiveThreadId((prev) => (prev === id ? null : prev))
         return
       }
-      await fetch(`/api/assistant/threads/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "archived" }),
-      })
+      try {
+        const res = await fetch(`/api/assistant/threads/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "archived" }),
+        })
+        if (!res.ok) {
+          await enqueueAssistantPatch(id, { status: "archived" })
+        }
+      } catch {
+        await enqueueAssistantPatch(id, { status: "archived" })
+      }
       await ensureActiveRemoteThreadAfterRemoval(id)
     },
     [ensureActiveRemoteThreadAfterRemoval]
@@ -621,8 +679,8 @@ The user must confirm before any task or project is saved. Prefer **General** wh
   const deleteThread = useCallback(
     async (id: string) => {
       if (!isWorkspaceFileSyncEnabled()) {
-        deleteSavedThread(id)
-        setSavedThreads(getSavedThreads())
+        await deleteSavedThreadAsync(id)
+        setSavedThreads(await getSavedThreadsAsync())
         setActiveThreadId((prev) => (prev === id ? null : prev))
         return
       }

@@ -27,6 +27,11 @@ import type { DocumentType } from "@/lib/types"
 import { ALL_PROJECTS_FILTER, useWorkspace } from "@/lib/workspace/context"
 import { getStoredCrmAiModel } from "@/lib/crm-ai-settings"
 import { documentTypeFromFileName, maybeImagePreviewDataUrl } from "@/lib/document-upload"
+import {
+  enqueueDocumentAnalysisJob,
+  flushDocumentAnalysisQueue,
+} from "@/lib/document-analysis-queue"
+import { toast } from "sonner"
 
 const FileIcon = ({ type }: { type: DocumentType }) => {
   const props = { size: 32 }
@@ -62,6 +67,21 @@ export default function DocumentsPage() {
       setProjectFilter(selectedProjectFilterId)
     }
   }, [selectedProjectFilterId])
+
+  useEffect(() => {
+    const run = () => {
+      void flushDocumentAnalysisQueue((job, result) => {
+        if (typeof result.extracted === "string") {
+          setPendingAnalysis({ extracted: result.extracted, fileName: job.fileName })
+          setAnalysisState("done")
+          toast.success(`Analysis ready: ${job.fileName}`)
+        }
+      })
+    }
+    window.addEventListener("online", run)
+    void run()
+    return () => window.removeEventListener("online", run)
+  }, [])
 
   const effectiveProjectFilter =
     selectedProjectFilterId !== ALL_PROJECTS_FILTER
@@ -99,16 +119,25 @@ export default function DocumentsPage() {
       })
     }
 
-    // Auto-analyze the first file with Gemini
+    // Auto-analyze the first file with Gemini (queue when offline)
     const firstFile = fileArray[0]
     if (!firstFile) return
     setAnalysisState("analyzing")
     setPendingAnalysis(null)
+    const instructions =
+      "List all concrete action items, tasks, phases, and deliverables with any dates or deadlines mentioned. Be specific and detailed."
+    const model = getStoredCrmAiModel()
     try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await enqueueDocumentAnalysisJob({ file: firstFile, instructions, model })
+        setAnalysisState("idle")
+        toast.info("You’re offline — document analysis is queued and will run when you’re back online.")
+        return
+      }
       const fd = new FormData()
       fd.set("file", firstFile)
-      fd.set("instructions", "List all concrete action items, tasks, phases, and deliverables with any dates or deadlines mentioned. Be specific and detailed.")
-      fd.set("model", getStoredCrmAiModel())
+      fd.set("instructions", instructions)
+      fd.set("model", model)
       const res = await fetch("/api/process-file", { method: "POST", body: fd })
       const data = (await res.json()) as { extracted?: string; error?: string }
       if (res.ok && typeof data.extracted === "string") {
@@ -118,7 +147,13 @@ export default function DocumentsPage() {
         setAnalysisState("error")
       }
     } catch {
-      setAnalysisState("error")
+      try {
+        await enqueueDocumentAnalysisJob({ file: firstFile, instructions, model })
+        setAnalysisState("idle")
+        toast.info("Analysis queued — will retry when the connection is stable.")
+      } catch {
+        setAnalysisState("error")
+      }
     }
   }
 
