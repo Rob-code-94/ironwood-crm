@@ -27,14 +27,9 @@ jobs:
     timeout-minutes: 45
 
     env:
-      # Set these as repository secrets to enable Developer ID signing +
-      # notarization. Without them, electron-builder ships an unsigned bundle
-      # that users must right-click + Open the first time.
-      CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
-      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Unsigned builds: do not set CSC_* / APPLE_* here. Empty secrets expand to ""
+      # and electron-builder treats CSC_LINK as a file path and fails.
+      # When you add Apple signing, set repo secrets and pass them only then.
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
