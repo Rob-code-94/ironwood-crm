@@ -12,6 +12,10 @@ try {
   updater.logger = log
   updater.autoDownload = true
   updater.autoInstallOnAppQuit = true
+  // GitHub no longer serves JSON for `…/releases/latest` with `Accept: application/json`
+  // (GitHubProvider gets 406). Using the Atom feed avoids that request while still
+  // resolving `latest-mac.yml` under each tag’s release assets.
+  updater.allowPrerelease = true
 } catch (err) {
   log.warn(`[updater] electron-updater not available: ${err}`)
 }
