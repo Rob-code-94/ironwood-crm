@@ -20,6 +20,9 @@ const { createTray } = require("./tray.cjs")
 const { setupAutoUpdater, checkForUpdatesManual } = require("./updater.cjs")
 const { setupNotifications } = require("./notifications.cjs")
 
+/** Matches `electron-builder.yml` publish target; used for “open releases” in Settings. */
+const GITHUB_RELEASES_LATEST_URL = "https://github.com/Rob-code-94/ironwood-crm/releases/latest"
+
 /** Always `…/Logs/Ironwood Planner/` (not the `package.json` name `ironwood-crm`). */
 function getIronwoodLogsDirectory() {
   try {
@@ -274,6 +277,15 @@ async function bootstrap() {
       if (failed) log.warn(`[main] open userData folder: ${failed}`)
     })
     return { ok: true }
+  })
+  ipcMain.handle("ironwood:open-latest-release", async () => {
+    try {
+      await shell.openExternal(GITHUB_RELEASES_LATEST_URL)
+      return { ok: true }
+    } catch (e) {
+      log.warn(`[main] open latest release: ${e}`)
+      return { ok: false, error: String(e?.message ?? e) }
+    }
   })
 
   app.on("before-quit", () => {

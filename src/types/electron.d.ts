@@ -38,6 +38,8 @@ export interface IronwoodBridge {
     check: () => Promise<{ ok: boolean; version?: string; error?: string }>
     status: () => Promise<IronwoodUpdateStatus>
     install: () => Promise<{ ok: boolean; error?: string }>
+    /** Opens the GitHub Releases page (for manual DMG install when auto-install is blocked). */
+    openLatestRelease: () => Promise<{ ok: boolean; error?: string }>
     onStatus: (listener: (status: IronwoodUpdateStatus) => void) => () => void
   }
   notifications: {

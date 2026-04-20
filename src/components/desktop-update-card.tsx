@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress, ProgressIndicator, ProgressTrack, ProgressValue } from "@/components/ui/progress"
-import { ArrowClockwise, Cloud, Download, Desktop } from "@phosphor-icons/react"
+import { ArrowClockwise, ArrowSquareOut, Download, Desktop } from "@phosphor-icons/react"
 import { toast } from "sonner"
 import { getElectron } from "@/lib/electron/client"
 import type { IronwoodUpdateStatus } from "@/types/electron"
@@ -54,10 +54,28 @@ export function DesktopUpdateCard() {
     const bridge = getElectron()
     if (!bridge) return
     const res = await bridge.update.install()
-    if (!res.ok) toast.error(res.error ?? "Install failed")
+    if (!res.ok) {
+      const msg = res.error ?? "Install failed"
+      toast.error(msg)
+      if (/signature|code requirement/i.test(msg)) {
+        toast.message(
+          "macOS blocked replacing the app because the update is not signed the same way as your installed copy. Download the latest DMG from GitHub and drag it into Applications.",
+          { duration: 12_000 }
+        )
+      }
+    }
+  }, [])
+
+  const onOpenReleases = useCallback(async () => {
+    const bridge = getElectron()
+    if (!bridge) return
+    const res = await bridge.update.openLatestRelease()
+    if (!res.ok) toast.error(res.error ?? "Could not open releases page")
   }, [])
 
   if (!available) return null
+
+  const isMac = getElectron()?.platform === "darwin"
 
   return (
     <Card>
@@ -104,7 +122,19 @@ export function DesktopUpdateCard() {
               Restart to install {status.version ?? "update"}
             </Button>
           ) : null}
+          <Button type="button" variant="outline" size="sm" onClick={onOpenReleases}>
+            <ArrowSquareOut size={14} />
+            Get latest DMG
+          </Button>
         </div>
+        {isMac ? (
+          <p className="text-xs text-muted-foreground">
+            In-app restart only works when every release is built with the same{" "}
+            <strong className="font-medium text-foreground">Apple Developer ID</strong> signature.
+            Unsigned CI builds can still download an update, but macOS may refuse to install it—use{" "}
+            <strong className="font-medium text-foreground">Get latest DMG</strong> instead.
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           Ironwood checks for updates automatically a few seconds after launch and any time you
           press the button above. You can keep working while a download finishes in the background.

@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld("ironwood", {
     check: () => ipcRenderer.invoke("ironwood:update-check"),
     status: () => ipcRenderer.invoke("ironwood:update-status"),
     install: () => ipcRenderer.invoke("ironwood:update-install"),
+    openLatestRelease: () => ipcRenderer.invoke("ironwood:open-latest-release"),
     onStatus: (listener) => {
       updateListeners.add(listener)
       return () => updateListeners.delete(listener)
