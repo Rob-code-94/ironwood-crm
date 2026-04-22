@@ -28,6 +28,8 @@ export type FlushWorkspacePutResult =
   | { ok: false; kind: "conflict" }
   | { ok: false; kind: "destructive" | "validation"; message?: string }
   | { ok: false; kind: "network" }
+  /** Server refused sync (usually missing Firebase Admin / Firestore in production). */
+  | { ok: false; kind: "sync_disabled"; message?: string }
 
 /**
  * Sends the pending outbox PUT, or nothing if queue empty.
@@ -93,6 +95,17 @@ export async function flushWorkspacePutOutbox(
       }
       await clearWorkspacePutOutbox()
       return { ok: false, kind: "destructive", message }
+    }
+
+    if (res.status === 503) {
+      let message: string | undefined
+      try {
+        const j = (await res.json()) as { error?: string }
+        message = j.error
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, kind: "sync_disabled", message }
     }
 
     return { ok: false, kind: "network" }

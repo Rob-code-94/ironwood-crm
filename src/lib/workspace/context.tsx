@@ -549,6 +549,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setWorkspaceSyncState("idle")
         return
       }
+      if (result.kind === "sync_disabled") {
+        toast.warning("Cloud workspace sync unavailable", {
+          description:
+            result.message?.trim() ||
+            "Production needs Firebase Admin (Firestore) on the server. See docs/workspace-firestore.md.",
+        })
+        setWorkspaceSyncState("idle")
+        return
+      }
       setWorkspaceSyncState(typeof navigator !== "undefined" && navigator.onLine ? "error" : "pending")
     })()
   }, [applyRemoteSnapshot])
@@ -580,6 +589,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
         if (result.kind === "destructive" || result.kind === "validation") {
           if (result.message) toast.error(result.message)
+          setWorkspaceSyncState("idle")
+          return
+        }
+        if (result.kind === "sync_disabled") {
+          toast.warning("Cloud workspace sync unavailable", {
+            description:
+              result.message?.trim() ||
+              "Production needs Firebase Admin (Firestore) on the server. See docs/workspace-firestore.md.",
+          })
           setWorkspaceSyncState("idle")
           return
         }
@@ -711,6 +729,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 : Date.now()
             lastServerPersistedAtRef.current = persisted
             lastServerSnapshotForGuardRef.current = { ...snapshot, persistedAt: persisted }
+            setWorkspaceSyncState("idle")
+            return
+          }
+
+          if (res.status === 503) {
+            let description = ""
+            try {
+              const j = (await res.json()) as { error?: string }
+              description = j.error?.trim() ?? ""
+            } catch {
+              /* ignore */
+            }
+            toast.warning("Cloud workspace sync unavailable", {
+              description:
+                description ||
+                  "Production needs Firebase Admin (Firestore) on the server. See docs/workspace-firestore.md.",
+            })
             setWorkspaceSyncState("idle")
             return
           }

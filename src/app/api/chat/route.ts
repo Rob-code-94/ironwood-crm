@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import { getGoogleApiKeyFromRequest } from "@/lib/ai-request"
 import { resolveGeminiModel, streamGeminiChat, generateGeminiChatOnce, type SimpleChatMessage } from "@/lib/gemini-client"
 
+export const maxDuration = 120
+export const runtime = "nodejs"
+
 type ChatBody = {
   messages?: SimpleChatMessage[]
   message?: string

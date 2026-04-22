@@ -4,6 +4,9 @@ import { resolveGeminiModel } from "@/lib/gemini-client"
 import { parseCommandWithGemini } from "@/lib/command-executor"
 import type { CommandProjectCatalogEntry } from "@/lib/project-catalog"
 
+export const maxDuration = 120
+export const runtime = "nodejs"
+
 type Body = {
   command?: string
   commandType?: string
