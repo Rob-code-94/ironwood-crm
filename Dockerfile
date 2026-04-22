@@ -22,6 +22,10 @@ RUN npx next build --webpack && \
     exit 1; \
   fi
 
+# Replace the incomplete next package that file tracing produces with the full one.
+# Without this, require('next') in server.js fails at runtime in the container.
+RUN cp -r /app/node_modules/next /app/.next/standalone/node_modules/next
+
 # Stage 2: Runtime
 FROM node:20-alpine
 
