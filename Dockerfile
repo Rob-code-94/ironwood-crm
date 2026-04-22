@@ -23,8 +23,13 @@ RUN npx next build --webpack && \
   fi
 
 # Replace the incomplete next package that file tracing produces with the full one.
-# Without this, require('next') in server.js fails at runtime in the container.
-RUN cp -r /app/node_modules/next /app/.next/standalone/node_modules/next
+# BusyBox `cp -r` into an existing `next` dir can nest as `next/next` and break resolution.
+RUN rm -rf /app/.next/standalone/node_modules/next && \
+  cp -r /app/node_modules/next /app/.next/standalone/node_modules/next && \
+  test -f /app/.next/standalone/node_modules/next/package.json && \
+  mkdir -p /tmp/cr-runtime-test && cp -a /app/.next/standalone/. /tmp/cr-runtime-test/ && \
+  cd /tmp/cr-runtime-test && node -e "require('next'); console.log('next isolate ok')" && \
+  rm -rf /tmp/cr-runtime-test
 
 # Stage 2: Runtime
 FROM node:20-alpine
@@ -35,6 +40,8 @@ WORKDIR /app
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/static ./.next/static
+
+RUN node -e "require('next'); console.log('runtime image: next ok')"
 
 # Set environment for production
 ENV NODE_ENV=production
