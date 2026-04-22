@@ -1,20 +1,22 @@
-# Multi-stage build for Next.js application
-# Stage 1: Builder
+# Three-stage Docker build for Cloud Run using `next start` + full production node_modules.
+# Avoids broken Next.js standalone file tracing (incomplete `next` package / missing @swc/helpers).
+
+FROM node:20-alpine AS deps
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+
+RUN npm ci
+
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build with webpack only. Turbopack server output breaks standalone at runtime on Cloud Run
-# (missing next-server/app-route-turbo.runtime.prod.js). Do not rely on npm script alone in CI.
+# Turbopack server chunks break production API routes; force webpack for the server bundle.
 RUN npx next build --webpack && \
   if find .next/server -name '*turbopack*' 2>/dev/null | grep -q .; then \
     echo "ERROR: Turbopack artifacts under .next/server — webpack build required."; \
@@ -22,33 +24,21 @@ RUN npx next build --webpack && \
     exit 1; \
   fi
 
-# Replace the incomplete next package that file tracing produces with the full one.
-# BusyBox `cp -r` into an existing `next` dir can nest as `next/next` and break resolution.
-RUN rm -rf /app/.next/standalone/node_modules/next && \
-  cp -r /app/node_modules/next /app/.next/standalone/node_modules/next && \
-  test -f /app/.next/standalone/node_modules/next/package.json && \
-  mkdir -p /tmp/cr-runtime-test && cp -a /app/.next/standalone/. /tmp/cr-runtime-test/ && \
-  cd /tmp/cr-runtime-test && node -e "require('next'); console.log('next isolate ok')" && \
-  rm -rf /tmp/cr-runtime-test
-
-# Stage 2: Runtime
-FROM node:20-alpine
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Copy built application from builder
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/static ./.next/static
-
-RUN node -e "require('next'); console.log('runtime image: next ok')"
-
-# Set environment for production
 ENV NODE_ENV=production
 
-# Expose port (Cloud Run sets PORT env var, default 8080)
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package-lock.json* ./
+COPY --from=builder /app/next.config.ts ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+
+RUN npm ci --omit=dev && node -e "require('next'); console.log('next ok')"
+
 EXPOSE 8080
 
-# Start the application
-# Next.js in standalone mode respects the PORT environment variable
-CMD ["node", "server.js"]
+# Cloud Run sets PORT; default 8080 for local docker run.
+CMD ["sh", "-c", "exec npx next start -p \"${PORT:-8080}\""]
