@@ -13,8 +13,14 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application (creates .next/standalone)
-RUN npm run build
+# Build with webpack only. Turbopack server output breaks standalone at runtime on Cloud Run
+# (missing next-server/app-route-turbo.runtime.prod.js). Do not rely on npm script alone in CI.
+RUN npx next build --webpack && \
+  if find .next/server -name '*turbopack*' 2>/dev/null | grep -q .; then \
+    echo "ERROR: Turbopack artifacts under .next/server — webpack build required."; \
+    find .next/server -name '*turbopack*' | head -20; \
+    exit 1; \
+  fi
 
 # Stage 2: Runtime
 FROM node:20-alpine
