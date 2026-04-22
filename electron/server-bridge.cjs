@@ -49,6 +49,17 @@ function loadOptionalServerEnv(userDataPath) {
   }
 }
 
+function computeDesktopWorkspaceEnv(userDataPath) {
+  if (!userDataPath || typeof userDataPath !== "string") return {}
+  const workspaceFile = path.join(userDataPath, "workspace-snapshot.json")
+  return {
+    // Desktop packaged app runs in production, but we still want local workspace
+    // snapshot sync enabled even when Firebase admin credentials are missing.
+    IRONWOOD_WORKSPACE_ALLOW_PRODUCTION: "true",
+    IRONWOOD_WORKSPACE_FILE: workspaceFile,
+  }
+}
+
 function waitForHttp(url, { timeoutMs = 30000, intervalMs = 200 } = {}) {
   const deadline = Date.now() + timeoutMs
   return new Promise((resolve, reject) => {
@@ -107,6 +118,7 @@ async function startBundledServer({ resourcesPath, hostname = "127.0.0.1", userD
   const url = `http://${hostname}:${port}`
 
   const extraEnv = loadOptionalServerEnv(userDataPath)
+  const desktopWorkspaceEnv = computeDesktopWorkspaceEnv(userDataPath)
   if (Object.keys(extraEnv).length > 0) {
     const pid = extraEnv.FIREBASE_PROJECT_ID
     log.info(
@@ -120,6 +132,11 @@ async function startBundledServer({ resourcesPath, hostname = "127.0.0.1", userD
         "projects stay empty until you add Firebase credentials (same as hosted app) or use local-only data."
     )
   }
+  if (desktopWorkspaceEnv.IRONWOOD_WORKSPACE_FILE) {
+    log.info(
+      `[server] workspace fallback file: ${desktopWorkspaceEnv.IRONWOOD_WORKSPACE_FILE}`
+    )
+  }
 
   log.info(`[server] starting bundled Next server: node ${serverJs} (cwd=${root})`)
 
@@ -127,6 +144,7 @@ async function startBundledServer({ resourcesPath, hostname = "127.0.0.1", userD
     cwd: root,
     env: {
       ...process.env,
+      ...desktopWorkspaceEnv,
       ...extraEnv,
       NODE_ENV: "production",
       PORT: String(port),
