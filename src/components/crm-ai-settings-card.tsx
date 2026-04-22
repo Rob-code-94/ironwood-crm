@@ -21,6 +21,13 @@ import { GEMINI_DOCS } from "@/lib/gemini-tools"
 import { toast } from "sonner"
 import { Key, Robot } from "@phosphor-icons/react"
 
+type SessionKeyStatus = {
+  ok: true
+  hasEnvKey: boolean
+  hasSessionCookie: boolean
+  effectiveSource: "env" | "session_cookie" | "none"
+}
+
 export function CrmAiSettingsCard() {
   const [model, setModel] = useState<CrmAiModelId>(() =>
     typeof window === "undefined" ? DEFAULT_CRM_MODEL : getStoredCrmAiModel()
@@ -29,6 +36,7 @@ export function CrmAiSettingsCard() {
     typeof window === "undefined" ? "" : getStoredCrmSystemPrompt()
   )
   const [sessionKey, setSessionKey] = useState("")
+  const [keyStatus, setKeyStatus] = useState<SessionKeyStatus | null>(null)
 
   function savePreferences() {
     setStoredCrmAiModel(model)
@@ -57,7 +65,27 @@ export function CrmAiSettingsCard() {
 
   async function clearSessionKey() {
     await fetch("/api/ai/session-key", { method: "DELETE" })
+    setKeyStatus(null)
     toast.success("Session key cleared.")
+  }
+
+  async function checkKeyStatus() {
+    const res = await fetch("/api/ai/session-key", { method: "GET" })
+    if (!res.ok) {
+      toast.error("Could not check key status.")
+      return
+    }
+    const status = (await res.json()) as SessionKeyStatus
+    setKeyStatus(status)
+    if (status.effectiveSource === "none") {
+      toast.message("No active Gemini key found (env or session cookie).")
+      return
+    }
+    toast.success(
+      status.effectiveSource === "env"
+        ? "Gemini key is active from environment/server-env.json."
+        : "Gemini key is active from this app's session cookie."
+    )
   }
 
   return (
@@ -83,6 +111,8 @@ export function CrmAiSettingsCard() {
             Gemini quickstart
           </a>
           .
+          In the packaged desktop app, this saved key is scoped to the local app session on this
+          machine.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -122,10 +152,23 @@ export function CrmAiSettingsCard() {
               <Button type="button" onClick={saveSessionKey}>
                 Save API key
               </Button>
+              <Button type="button" variant="secondary" onClick={checkKeyStatus}>
+                Check key status
+              </Button>
               <Button type="button" variant="outline" onClick={clearSessionKey}>
                 Remove key from this browser
               </Button>
             </div>
+            {keyStatus ? (
+              <p className="text-xs text-muted-foreground">
+                Status:{" "}
+                {keyStatus.effectiveSource === "env"
+                  ? "Using environment key (server env)."
+                  : keyStatus.effectiveSource === "session_cookie"
+                    ? "Using saved session cookie key for this desktop app."
+                    : "No key detected."}
+              </p>
+            ) : null}
           </AlertDescription>
         </Alert>
 
