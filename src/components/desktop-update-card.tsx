@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress, ProgressIndicator, ProgressTrack, ProgressValue } from "@/components/ui/progress"
-import { ArrowClockwise, ArrowSquareOut, Cloud, Download, Desktop } from "@phosphor-icons/react"
+import { ArrowClockwise, ArrowSquareOut, Cloud, Desktop, Download } from "@phosphor-icons/react"
 import { toast } from "sonner"
 import { getElectron } from "@/lib/electron/client"
 import type { IronwoodUpdateStatus } from "@/types/electron"
@@ -47,22 +47,6 @@ export function DesktopUpdateCard() {
     } else if (res.version) {
       setAvailableVersion(res.version)
       toast.message(`Latest version: ${res.version}`)
-    }
-  }, [])
-
-  const onInstall = useCallback(async () => {
-    const bridge = getElectron()
-    if (!bridge) return
-    const res = await bridge.update.install()
-    if (!res.ok) {
-      const msg = res.error ?? "Install failed"
-      toast.error(msg)
-      if (/signature|code requirement/i.test(msg)) {
-        toast.message(
-          "macOS blocked replacing the app because the update is not signed the same way as your installed copy. Download the latest DMG from GitHub and drag it into Applications.",
-          { duration: 12_000 }
-        )
-      }
     }
   }, [])
 
@@ -116,29 +100,21 @@ export function DesktopUpdateCard() {
             <ArrowClockwise size={14} />
             {busy || status.state === "checking" ? "Checking…" : "Check for updates"}
           </Button>
-          {status.state === "downloaded" ? (
-            <Button type="button" size="sm" onClick={onInstall}>
-              <Download size={14} />
-              Restart to install {status.version ?? "update"}
-            </Button>
-          ) : null}
           <Button type="button" variant="outline" size="sm" onClick={onOpenReleases}>
             <ArrowSquareOut size={14} />
-            Get latest DMG
+            {status.state === "downloaded" ? "Install via latest DMG" : "Get latest DMG"}
           </Button>
         </div>
         {isMac ? (
           <p className="text-xs text-muted-foreground">
-            In-app restart only works when every release is built with the same{" "}
-            <strong className="font-medium text-foreground">Apple Developer ID</strong> signature.
-            Unsigned CI builds can still download an update, but macOS may refuse to install it—use{" "}
-            <strong className="font-medium text-foreground">Get latest DMG</strong> instead.
+            Unsigned macOS update flow: quit Ironwood, open the latest DMG, drag the new app into{" "}
+            <strong className="font-medium text-foreground">Applications</strong> to replace, then reopen.
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">
           Ironwood checks for updates automatically a few seconds after launch and any time you
           press the button above. You can keep working while a download finishes in the background.
-          Installation replaces the old app when you choose restart.
+          For unsigned macOS builds, apply updates via DMG replacement.
         </p>
       </CardContent>
     </Card>
@@ -186,8 +162,8 @@ function UpdateStatusLine({ status }: { status: IronwoodUpdateStatus }) {
     }
     case "downloaded":
       return (
-        <StatusRow icon={<Download size={14} />}>
-          Update {status.version ?? ""} downloaded. Restart to apply.
+        <StatusRow icon={<ArrowSquareOut size={14} />}>
+          Update {status.version ?? ""} is ready. Install it from the latest DMG.
         </StatusRow>
       )
     case "up-to-date":

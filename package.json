@@ -17,6 +17,7 @@
     "test": "vitest run",
     "clean": "rm -rf .next",
     "deploy:cloud-run": "bash scripts/deploy-cloud-run.sh",
+    "release:desktop:patch": "bash scripts/release-desktop-patch.sh",
     "electron": "electron .",
     "electron:dev": "concurrently -k -n next,electron -c green,cyan \"npm:dev\" \"wait-on -t 60000 tcp:3000 && cross-env IRONWOOD_DEV_URL=http://127.0.0.1:3000 electron .\"",
     "electron:bundle": "node scripts/copy-electron-bundle.mjs",

@@ -22,6 +22,22 @@ try {
 
 let lastStatus = { state: "idle" }
 
+function isSignatureInstallError(input) {
+  const msg = String(input?.message ?? input ?? "").toLowerCase()
+  return (
+    msg.includes("code signature") ||
+    msg.includes("code requirement") ||
+    msg.includes("did not pass validation")
+  )
+}
+
+function toUserUpdateError(err) {
+  if (isSignatureInstallError(err)) {
+    return "macOS blocked in-app install for this unsigned build. Use 'Get latest DMG', replace the app in Applications, then reopen."
+  }
+  return String(err?.message ?? err)
+}
+
 function broadcast(status) {
   lastStatus = status
   for (const win of BrowserWindow.getAllWindows()) {
@@ -48,7 +64,7 @@ function setupAutoUpdater() {
   updater.on("update-not-available", (info) =>
     broadcast({ state: "up-to-date", version: info?.version })
   )
-  updater.on("error", (err) => broadcast({ state: "error", message: String(err?.message ?? err) }))
+  updater.on("error", (err) => broadcast({ state: "error", message: toUserUpdateError(err) }))
   updater.on("download-progress", (progress) =>
     broadcast({
       state: "downloading",
@@ -73,6 +89,13 @@ function setupAutoUpdater() {
   ipcMain.handle("ironwood:update-status", () => lastStatus)
 
   ipcMain.handle("ironwood:update-install", async () => {
+    if (process.platform === "darwin") {
+      return {
+        ok: false,
+        error:
+          "In-app install is disabled for unsigned macOS builds. Use 'Get latest DMG', replace the app in Applications, then reopen.",
+      }
+    }
     try {
       // `isSilent: true` keeps install non-interactive; `isForceRunAfter: true`
       // relaunches the new version so the user lands back in the app.
@@ -166,17 +189,22 @@ async function checkForUpdatesManual() {
     const { response } = await dialog.showMessageBox({
       type: "info",
       title: "Update ready",
-      message: `Version ${nextVersion} is downloaded. Restart Ironwood Planner to install it now?`,
-      buttons: ["Restart and install", "Later"],
+      message:
+        `Version ${nextVersion} is ready.\n\n` +
+        "For unsigned macOS builds, install via DMG:\n" +
+        "1) Open latest release\n2) Download DMG\n3) Drag app to Applications and replace\n4) Reopen Ironwood Planner.",
+      buttons: ["Open latest release", "Later"],
       defaultId: 0,
       cancelId: 1,
     })
 
     if (response === 0) {
       try {
-        updater.quitAndInstall(true, true)
-      } catch (qErr) {
-        log.warn(`[updater] quitAndInstall: ${qErr}`)
+        await require("electron").shell.openExternal(
+          "https://github.com/Rob-code-94/ironwood-crm/releases/latest"
+        )
+      } catch (openErr) {
+        log.warn(`[updater] open release link: ${openErr}`)
       }
     }
   } catch (err) {
